@@ -46,154 +46,160 @@ using System.Xml.Linq;
 
 namespace MonoDevelop.Ide.WelcomePage
 {
-	public class WelcomePageWidget : Gtk.EventBox
-	{
-		public Gdk.Pixbuf LogoImage { get; set; }
-		public int LogoHeight { get; set; }
-		public Gdk.Pixbuf TopBorderImage { get; set; }
-		public Gdk.Pixbuf BackgroundImage { get; set; }
-		public string BackgroundColor { get; set; }
+    public class WelcomePageWidget : Gtk.EventBox
+    {
+        public Gdk.Pixbuf LogoImage { get; set; }
 
-		protected double OverdrawOpacity {
-			get { return Background.OverdrawOpacity; }
-			set { Background.OverdrawOpacity = value; }
-		}
+        public int LogoHeight { get; set; }
 
-		protected int OverdrawOffset {
-			get { return Background.OverdrawOffset; }
-			set { Background.OverdrawOffset = value; }
-		}
+        public Gdk.Pixbuf TopBorderImage { get; set; }
 
-		WelcomePageWidgetBackground Background { get; set; }
+        public Gdk.Pixbuf BackgroundImage { get; set; }
 
-		public bool ShowScrollbars { get; set; }
+        public string BackgroundColor { get; set; }
 
-		public WelcomePageWidget ()
-		{
-			ShowScrollbars = true;
-			VisibleWindow = false;
+        protected double OverdrawOpacity {
+            get { return Background.OverdrawOpacity; }
+            set { Background.OverdrawOpacity = value; }
+        }
 
-			BackgroundColor = "white";
-			LogoHeight = 90;
+        protected int OverdrawOffset {
+            get { return Background.OverdrawOffset; }
+            set { Background.OverdrawOffset = value; }
+        }
 
-			var background = new WelcomePageWidgetBackground ();
-			Background = background;
-			background.Owner = this;
-			var mainAlignment = new Gtk.Alignment (0f, 0f, 1f, 1f);
-			background.Add (mainAlignment);
+        WelcomePageWidgetBackground Background { get; set; }
 
-			BuildContent (mainAlignment);
+        public bool ShowScrollbars { get; set; }
 
-			if (ShowScrollbars) {
-				var scroller = new ScrolledWindow ();
-				scroller.AddWithViewport (background);
-				((Gtk.Viewport)scroller.Child).ShadowType = ShadowType.None;
-				scroller.ShadowType = ShadowType.None;
-				scroller.FocusChain = new Widget[] { background };
-				scroller.Show ();
-				Add (scroller);
-			} else
-				this.Add (background);
+        public WelcomePageWidget ()
+        {
+            ShowScrollbars = true;
+            VisibleWindow = false;
 
-			if (LogoImage != null) {
-				var logoHeight = LogoHeight;
-				mainAlignment.SetPadding ((uint)(logoHeight + Styles.WelcomeScreen.Spacing), 0, (uint)Styles.WelcomeScreen.Spacing, 0);
-			}
+            BackgroundColor = "white";
+            LogoHeight = 90;
 
-			ShowAll ();
+            var background = new WelcomePageWidgetBackground ();
+            Background = background;
+            background.Owner = this;
+            var mainAlignment = new Gtk.Alignment (0f, 0f, 1f, 1f);
+            background.Add (mainAlignment);
 
-			IdeApp.Workbench.GuiLocked += OnLock;
-			IdeApp.Workbench.GuiUnlocked += OnUnlock;
-		}
+            BuildContent (mainAlignment);
 
-		void OnLock (object s, EventArgs a)
-		{
-			Sensitive = false;
-		}
-		
-		void OnUnlock (object s, EventArgs a)
-		{
-			Sensitive = true;
-		}
+            if (ShowScrollbars) {
+                var scroller = new ScrolledWindow ();
+                scroller.AddWithViewport (background);
+                ((Gtk.Viewport)scroller.Child).ShadowType = ShadowType.None;
+                scroller.ShadowType = ShadowType.None;
+                scroller.FocusChain = new Widget[] { background };
+                scroller.Show ();
+                Add (scroller);
+            } else
+                this.Add (background);
 
-		protected virtual void BuildContent (Container parent)
-		{
-		}
+            if (LogoImage != null) {
+                var logoHeight = LogoHeight;
+                mainAlignment.SetPadding ((uint)(logoHeight + Styles.WelcomeScreen.Spacing), 0, (uint)Styles.WelcomeScreen.Spacing, 0);
+            }
 
-		
-		protected override void OnDestroyed ()
-		{
-			base.OnDestroyed ();
-			IdeApp.Workbench.GuiLocked -= OnLock;
-			IdeApp.Workbench.GuiUnlocked -= OnUnlock;
-		}
+            ShowAll ();
 
-		public class WelcomePageWidgetBackground : Gtk.EventBox
-		{
-			public WelcomePageWidget Owner { get; set; }
+            IdeApp.Workbench.GuiLocked += OnLock;
+            IdeApp.Workbench.GuiUnlocked += OnUnlock;
+        }
 
-			public double OverdrawOpacity { get; set; }
-			public int OverdrawOffset { get; set; }
+        void OnLock (object s, EventArgs a)
+        {
+            Sensitive = false;
+        }
 
-			protected override void OnRealized ()
-			{
-				Gdk.Color color = Gdk.Color.Zero;
-				if (!Gdk.Color.Parse (Owner.BackgroundColor, ref color))
-					color = Style.White;
-				ModifyBg (StateType.Normal, color);
+        void OnUnlock (object s, EventArgs a)
+        {
+            Sensitive = true;
+        }
 
-				base.OnRealized ();
-			}
+        protected virtual void BuildContent (Container parent)
+        {
+        }
 
-			void DrawOverdraw (Cairo.Context context, double opacity)
-			{
-				if (Owner.BackgroundImage == null)
-					return;
+        protected override void OnDestroyed ()
+        {
+            base.OnDestroyed ();
+            IdeApp.Workbench.GuiLocked -= OnLock;
+            IdeApp.Workbench.GuiUnlocked -= OnUnlock;
+        }
 
-				context.RenderTiled (Owner.BackgroundImage, Allocation, new Gdk.Rectangle (Allocation.X, Allocation.Y + OverdrawOffset, Allocation.Width, Allocation.Height - OverdrawOffset), opacity);
-			}
+        public class WelcomePageWidgetBackground : Gtk.EventBox
+        {
+            public WelcomePageWidget Owner { get; set; }
 
-			void DrawBackground (Cairo.Context context, Gdk.Rectangle area)
-			{
-				if (Owner.BackgroundImage == null)
-					return;
+            public double OverdrawOpacity { get; set; }
 
-				context.RenderTiled (Owner.BackgroundImage, Allocation, Allocation, 1);
-			}
+            public int OverdrawOffset { get; set; }
 
-			protected override bool OnExposeEvent (EventExpose evnt)
-			{
-				using (var context = CairoHelper.Create (evnt.Window)) {
-					context.SetSourceRGB (1, 1, 1);
-					context.Operator = Cairo.Operator.Source;
-					context.Paint ();
-					context.Operator = Cairo.Operator.Over;
-					DrawBackground (context, evnt.Area);
-				}
+            protected override void OnRealized ()
+            {
+                Gdk.Color color = Gdk.Color.Zero;
+                if (!Gdk.Color.Parse (Owner.BackgroundColor, ref color))
+                    color = Style.White;
+                ModifyBg (StateType.Normal, color);
 
-				if (Owner.LogoImage != null) {
-					var gc = Style.BackgroundGC (State);
-					var lRect = new Rectangle (Allocation.X, Allocation.Y, Owner.LogoImage.Width, Owner.LogoImage.Height);
-					if (evnt.Region.RectIn (lRect) != OverlapType.Out)
-						evnt.Window.DrawPixbuf (gc, Owner.LogoImage, 0, 0, lRect.X, lRect.Y, lRect.Width, lRect.Height, RgbDither.None, 0, 0);
-					
-					var bgRect = new Rectangle (Allocation.X + Owner.LogoImage.Width, Allocation.Y, Allocation.Width - Owner.LogoImage.Width, Owner.TopBorderImage.Height);
-					if (evnt.Region.RectIn (bgRect) != OverlapType.Out)
-						for (int x = bgRect.X; x < bgRect.Right; x += Owner.TopBorderImage.Width)
-							evnt.Window.DrawPixbuf (gc, Owner.TopBorderImage, 0, 0, x, bgRect.Y, Owner.TopBorderImage.Width, bgRect.Height, RgbDither.None, 0, 0);
-				}
+                base.OnRealized ();
+            }
+
+            void DrawOverdraw (Cairo.Context context, double opacity)
+            {
+                if (Owner.BackgroundImage == null)
+                    return;
+
+                context.RenderTiled (Owner.BackgroundImage, Allocation, new Gdk.Rectangle (Allocation.X, Allocation.Y + OverdrawOffset, Allocation.Width, Allocation.Height - OverdrawOffset), opacity);
+            }
+
+            void DrawBackground (Cairo.Context context, Gdk.Rectangle area)
+            {
+                if (Owner.BackgroundImage == null)
+                    return;
+
+                context.RenderTiled (Owner.BackgroundImage, Allocation, Allocation, 1);
+            }
+
+            protected override bool OnExposeEvent (EventExpose evnt)
+            {
+                using (var context = CairoHelper.Create (evnt.Window)) {
+                    context.SetSourceRGB (1, 1, 1);
+                    context.Operator = Cairo.Operator.Source;
+                    context.Paint ();
+                    context.Operator = Cairo.Operator.Over;
+                    DrawBackground (context, evnt.Area);
+                }
+
+                if (Owner.LogoImage != null) {
+                    var gc = Style.BackgroundGC (State);
+                    var lRect = new Rectangle (Allocation.X, Allocation.Y, Owner.LogoImage.Width, Owner.LogoImage.Height);
+                    if (evnt.Region.RectIn (lRect) != OverlapType.Out) {
+                        int w, h;
+                        evnt.Window.GetSize (out w, out h);
+                        evnt.Window.DrawPixbuf (gc, Owner.LogoImage, 0, 0, 0, lRect.Y, lRect.Width, lRect.Height, RgbDither.None, 0, 0);
+                    }
+                    var bgRect = new Rectangle (Allocation.X + Owner.LogoImage.Width, Allocation.Y, Allocation.Width - Owner.LogoImage.Width, Owner.TopBorderImage.Height);
+                    if (evnt.Region.RectIn (bgRect) != OverlapType.Out)
+                        for (int x = bgRect.X; x < bgRect.Right; x += Owner.TopBorderImage.Width)
+                            evnt.Window.DrawPixbuf (gc, Owner.TopBorderImage, 0, 0, x, bgRect.Y, Owner.TopBorderImage.Width, bgRect.Height, RgbDither.None, 0, 0);
+                }
 				
-				foreach (Widget widget in Children)
-					PropagateExpose (widget, evnt);
+                foreach (Widget widget in Children)
+                    PropagateExpose (widget, evnt);
 
-				if (OverdrawOpacity > 0) {
-					using (var context = Gdk.CairoHelper.Create (evnt.Window)) {
-						DrawOverdraw (context, OverdrawOpacity);
-					}
-				}
+                if (OverdrawOpacity > 0) {
+                    using (var context = Gdk.CairoHelper.Create (evnt.Window)) {
+                        DrawOverdraw (context, OverdrawOpacity);
+                    }
+                }
 				
-				return true;
-			}
-		}
-	}
+                return true;
+            }
+        }
+    }
 }

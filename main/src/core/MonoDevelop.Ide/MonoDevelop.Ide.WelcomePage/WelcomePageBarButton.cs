@@ -58,7 +58,7 @@ namespace MonoDevelop.Ide.WelcomePage
 			this.Text = GettextCatalog.GetString (title);
 			this.actionLink = href;
 			if (!string.IsNullOrEmpty (iconResource)) {
-				imageHover = Gdk.Pixbuf.LoadFromResource (iconResource);
+				imageHover = IdeApp.LoadImage (iconResource);
 				imageNormal = ImageService.MakeTransparent (imageHover, 0.7);
 			}
 

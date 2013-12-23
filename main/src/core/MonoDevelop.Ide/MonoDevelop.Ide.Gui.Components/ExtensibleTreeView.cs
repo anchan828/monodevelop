@@ -2272,9 +2272,9 @@ namespace MonoDevelop.Ide.Gui.Components
 
 			static CustomCellRendererText ()
 			{
-				popupIcon = Gdk.Pixbuf.LoadFromResource ("tree-popup-button.png");
-				popupIconDown = Gdk.Pixbuf.LoadFromResource ("tree-popup-button-down.png");
-				popupIconHover = Gdk.Pixbuf.LoadFromResource ("tree-popup-button-hover.png");
+				popupIcon = IdeApp.LoadImage ("tree-popup-button.png");
+				popupIconDown = IdeApp.LoadImage ("tree-popup-button-down.png");
+				popupIconHover = IdeApp.LoadImage ("tree-popup-button-hover.png");
 			}
 
 			[GLib.Property ("text-markup")]

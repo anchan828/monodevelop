@@ -69,9 +69,9 @@ namespace MonoDevelop.Components.Docking
 
 		static DockItemTitleTab ()
 		{
-			pixClose = Gdk.Pixbuf.LoadFromResource ("stock-close-12.png");
-			pixAutoHide = Gdk.Pixbuf.LoadFromResource ("stock-auto-hide.png");
-			pixDock = Gdk.Pixbuf.LoadFromResource ("stock-dock.png");
+			pixClose = IdeApp.LoadImage ("stock-close-12.png");
+			pixAutoHide = IdeApp.LoadImage ("stock-auto-hide.png");
+			pixDock = IdeApp.LoadImage ("stock-dock.png");
 		}
 		
 		public DockItemTitleTab (DockItem item, DockFrame frame)

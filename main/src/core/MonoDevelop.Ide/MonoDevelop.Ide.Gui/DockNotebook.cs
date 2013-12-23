@@ -479,13 +479,13 @@ namespace MonoDevelop.Ide.Gui
 			WidgetFlags |= Gtk.WidgetFlags.AppPaintable;
 			Events |= Gdk.EventMask.PointerMotionMask | Gdk.EventMask.LeaveNotifyMask | Gdk.EventMask.ButtonPressMask;
 
-			var arr = new Gtk.Image (Gdk.Pixbuf.LoadFromResource ("tabbar-prev.png"));
+			var arr = new Gtk.Image (IdeApp.LoadImage ("tabbar-prev.png"));
 			arr.HeightRequest = arr.WidthRequest = 10;
 			PreviousButton = new Button (arr);
 			PreviousButton.Relief = ReliefStyle.None;
 			PreviousButton.CanDefault = PreviousButton.CanFocus = false;
 
-			arr = new Gtk.Image (Gdk.Pixbuf.LoadFromResource ("tabbar-next.png"));
+			arr = new Gtk.Image (IdeApp.LoadImage ("tabbar-next.png"));
 			arr.HeightRequest = arr.WidthRequest = 10;
 			NextButton = new Button (arr);
 			NextButton.Relief = ReliefStyle.None;

@@ -58,15 +58,15 @@ namespace MonoDevelop.Components.MainToolbar
 			Events |= EventMask.ButtonPressMask | EventMask.ButtonReleaseMask;
 
 			btnNormalOriginal = new Gdk.Pixbuf[] {
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-LeftCap-Normal.png"),
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-MidCap-Normal.png"),
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-RightCap-Normal.png")
+				IdeApp.LoadImage ("btDebugBase-LeftCap-Normal.png"),
+				IdeApp.LoadImage ("btDebugBase-MidCap-Normal.png"),
+				IdeApp.LoadImage ("btDebugBase-RightCap-Normal.png")
 			};
 
 			btnPressedOriginal = new Gdk.Pixbuf[] {
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-LeftCap-Pressed.png"),
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-MidCap-Pressed.png"),
-				Gdk.Pixbuf.LoadFromResource ("btDebugBase-RightCap-Pressed.png")
+				IdeApp.LoadImage ("btDebugBase-LeftCap-Pressed.png"),
+				IdeApp.LoadImage ("btDebugBase-MidCap-Pressed.png"),
+				IdeApp.LoadImage ("btDebugBase-RightCap-Pressed.png")
 			};
 			btnNormal = new Pixbuf[btnNormalOriginal.Length];
 			btnPressed = new Pixbuf[btnNormalOriginal.Length];

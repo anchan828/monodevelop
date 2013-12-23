@@ -81,7 +81,7 @@ namespace MonoDevelop.Ide.WelcomePage
 		{
 			VisibleWindow = false;
 			SetSizeRequest (WidgetSize.Width, WidgetSize.Height);
-			starburst = Gdk.Pixbuf.LoadFromResource ("starburst.png");
+			starburst = IdeApp.LoadImage ("starburst.png");
 
 			string iconFile = BrandingService.GetString ("ApplicationIcon");
 			if (iconFile != null) {
