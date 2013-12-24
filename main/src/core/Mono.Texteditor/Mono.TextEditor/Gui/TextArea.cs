@@ -1876,9 +1876,7 @@ namespace Mono.TextEditor
 
                 GdkWindow.GetSize (out w, out h);
                 GdkWindow.DrawPixbuf (Style.BackgroundGC (State), image, 0, 0, w - image.Width, lRect.Y, lRect.Width, lRect.Height, RgbDither.None, 0, 0);
-                if (BackgroundAnimationIter != null) {
-                    QueueDraw ();
-                }
+                QueueDraw ();
             }
             return base.OnExposeEvent (e);
         }
