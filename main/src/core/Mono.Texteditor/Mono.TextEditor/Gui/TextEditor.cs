@@ -35,7 +35,6 @@ using Mono.TextEditor.PopupWindow;
 using Mono.TextEditor.Theatrics;
 using Gdk;
 using Gtk;
-using MonoDevelop.Core;
 
 namespace Mono.TextEditor
 {
