@@ -1894,12 +1894,20 @@ namespace Mono.TextEditor
         {
             var exePath = System.Reflection.Assembly.GetExecutingAssembly ().Location;
 
-            var bundleRoot = GetAppBundleRoot (exePath);
+
+            bool isWindows = System.IO.Path.DirectorySeparatorChar == '\\';
 
             var filePath = "";
 
-            if (!string.IsNullOrEmpty (bundleRoot)) {
-                filePath = System.IO.Path.Combine (bundleRoot, "Contents", "Resources", fileName + extension);
+            if(isWindows){
+
+            	filePath = System.IO.Path.GetDirectoryName (exePath) + "/" + fileName + extension;
+
+            }else{
+            	var bundleRoot = GetAppBundleRoot (exePath);
+            	if (!string.IsNullOrEmpty (bundleRoot)) {
+                	filePath = System.IO.Path.Combine (bundleRoot, "Contents", "Resources", fileName + extension);
+            	}	
             }
             return filePath;
         }
