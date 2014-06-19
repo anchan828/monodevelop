@@ -515,6 +515,51 @@ namespace MonoDevelop.Ide
 				instrumentationStatusIcon.Dispose ();
 			}
 		}
+
+		public static Gdk.Pixbuf LoadImage(string fileName)
+        {
+            FilePath exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+
+            var filePath = "";
+
+            bool isWindows = System.IO.Path.DirectorySeparatorChar == '\\';
+
+            if (isWindows)
+            {
+
+                filePath = System.IO.Path.GetDirectoryName(exePath) + "/branding/" + fileName;
+
+            }
+            else
+            {
+                var bundleRoot = GetAppBundleRoot(exePath);
+                if (bundleRoot.IsNotNull)
+                {
+                    filePath = bundleRoot.Combine("Contents", "Resources", fileName);
+                }
+            }
+            Gdk.Pixbuf image = null;
+
+            if (System.IO.File.Exists(filePath))
+            {
+                image = new Gdk.Pixbuf(System.IO.File.ReadAllBytes(filePath));
+            }
+            else
+            {
+                image = Gdk.Pixbuf.LoadFromResource(fileName);
+            }
+
+            return image;
+        }
+
+        static FilePath GetAppBundleRoot (FilePath path)
+        {
+            do {
+                if (path.Extension == ".app")
+                    return path;
+            } while ((path = path.ParentDirectory).IsNotNull);
+            return null;
+        }
 	}
 	
 	public class IdeServices

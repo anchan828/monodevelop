@@ -72,6 +72,9 @@ namespace Mono.TextEditor
 		
 		double mx, my;
 		
+		Gdk.Pixbuf BackgroundImage = null;
+		PixbufAnimationIter BackgroundAnimationIter = null;
+
 		public TextDocument Document {
 			get {
 				return textEditorData.Document;
@@ -387,6 +390,10 @@ namespace Mono.TextEditor
 					Options.Zoom += Options.Zoom * (args.Magnification / 4d);
 				});
 			}
+
+			BackgroundImage = LoadImage ("TextArea_Background", ".png");
+        	if (BackgroundImage == null)
+        		BackgroundAnimationIter = LoadGIF ("TextArea_Background");
 		}
 
 		public void RunAction (Action<TextEditorData> action)
@@ -1607,6 +1614,11 @@ namespace Mono.TextEditor
 				return true;
 			}
 			lastScrollTime = evnt.Time;
+
+			if (BackgroundImage != null) {
+				QueueDraw ();
+			}
+
 			return base.OnScrollEvent (evnt); 
 		}
 		
@@ -1819,9 +1831,84 @@ namespace Mono.TextEditor
 			if (Caret.IsVisible)
 				textViewMargin.DrawCaret (e.Window, Allocation);
 
+			var image = BackgroundImage;
+
+			if (BackgroundAnimationIter != null) {
+				BackgroundAnimationIter.Advance (System.IntPtr.Zero); 
+				image = BackgroundAnimationIter.Pixbuf;              
+			}
+
+			if (image != null) {
+				int w, h;
+				var lRect = new Rectangle (Allocation.X, Allocation.Y, image.Width, image.Height);
+
+				GdkWindow.GetSize (out w, out h);
+				GdkWindow.DrawPixbuf (Style.BackgroundGC (State), image, 0, 0, w - image.Width, lRect.Y, lRect.Width, lRect.Height, RgbDither.None, 0, 0);
+
+				if (BackgroundAnimationIter != null) {
+					QueueDraw ();
+				}
+			}
+
 			return base.OnExposeEvent (e);
 		}
 		
+		static string GetFilePath (string fileName, string extension)
+        {
+            var exePath = System.Reflection.Assembly.GetExecutingAssembly ().Location;
+
+
+            bool isWindows = System.IO.Path.DirectorySeparatorChar == '\\';
+
+            var filePath = "";
+
+            if(isWindows){
+
+            	filePath = System.IO.Path.GetDirectoryName (exePath) + "/branding/" + fileName + extension;
+
+            }else{
+            	var bundleRoot = GetAppBundleRoot (exePath);
+            	if (!string.IsNullOrEmpty (bundleRoot)) {
+                	filePath = System.IO.Path.Combine (bundleRoot, "Contents", "Resources", fileName + extension);
+            	}	
+            }
+            return filePath;
+        }
+
+		static PixbufAnimationIter LoadGIF (string fileName)
+		{
+			PixbufAnimationIter animationiter = null;
+			var filePath = GetFilePath (fileName, ".gif");
+			if (System.IO.File.Exists (filePath)) {
+				using (System.IO.Stream stream = new System.IO.FileStream (filePath, System.IO.FileMode.Open)) {
+					var animation = new Gdk.PixbufAnimation (stream);
+					animationiter = animation.GetIter (System.IntPtr.Zero);
+				}
+			}
+			return animationiter;
+		}
+
+		static Gdk.Pixbuf LoadImage (string fileName, string extension)
+		{
+			var filePath = GetFilePath (fileName, extension);
+			Gdk.Pixbuf image = null;
+
+			if (System.IO.File.Exists (filePath)) {
+				image = new Gdk.Pixbuf (System.IO.File.ReadAllBytes (filePath));
+			}
+
+			return image;
+        }
+
+		static string GetAppBundleRoot (string path)
+		{
+			do {
+				if (System.IO.Path.GetExtension (path) == ".app")
+					return path;
+			} while (!string.IsNullOrEmpty ((path = System.IO.Path.GetDirectoryName (path))));
+			return null;
+		}
+
 		protected virtual void OnPainted (PaintEventArgs e)
 		{
 			EventHandler<PaintEventArgs> handler = this.Painted;
