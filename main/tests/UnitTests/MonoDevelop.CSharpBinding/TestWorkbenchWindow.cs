@@ -105,13 +105,17 @@ namespace MonoDevelop.CSharpBinding
 			
 		}
 
+		public void InsertViewContent (int index, IAttachableViewContent subViewContent)
+		{
+			
+		}
+
 		public DocumentToolbar GetToolbar (IBaseViewContent targetView)
 		{
 			throw new NotImplementedException ();
 		}
 
 		public event EventHandler DocumentChanged;
-		public event EventHandler TitleChanged;
 		public event WorkbenchWindowEventHandler Closing;
 		public event WorkbenchWindowEventHandler Closed;
 		public event ActiveViewContentEventHandler ActiveViewContentChanged;

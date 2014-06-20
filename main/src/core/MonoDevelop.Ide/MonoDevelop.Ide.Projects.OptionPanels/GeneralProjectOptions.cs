@@ -64,8 +64,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 
 			projectNameEntry.Text = project.Name;
 			projectDescriptionTextView.Buffer.Text = project.Description;
-			
-			// TODO msbuild Move to build panel?
+
 			if (project is DotNetProject) {
 				projectDefaultNamespaceEntry.Text = ((DotNetProject)project).DefaultNamespace;
 			} else {
@@ -113,8 +112,9 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 			}
 			
 			project.Description = projectDescriptionTextView.Buffer.Text;
-			if (project is DotNetProject) 
+			if (project is DotNetProject) {
 				((DotNetProject)project).DefaultNamespace = projectDefaultNamespaceEntry.Text;
+			}
 			
 			if (newFilesOnLoadCheckButton.Active) {
 				project.NewFileSearch = autoInsertNewFilesCheckButton.Active ?  NewFileSearch.OnLoadAutoInsert : NewFileSearch.OnLoad;

@@ -8,10 +8,12 @@
 		<Icon>md-project|res:nunit-overlay-32.png</Icon>
 		<_Description>Creates an NUnit library</_Description>
 		<LanguageName>*</LanguageName>
+		<DefaultFilename>NUnitProject</DefaultFilename>
 	</TemplateConfiguration>
 	
 	<!-- Actions -->
 	<Actions>
+		<Open filename = "Test.cs"/>
 	</Actions>
 	
 	<!-- Template Content -->

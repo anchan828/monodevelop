@@ -25,17 +25,14 @@
 // THE SOFTWARE.
 
 using System;
-using System.Threading;
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Runtime.Remoting;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Framework;
 using System.Collections.Generic;
-using System.Collections;
 using System.Linq;
 using Microsoft.Build.Logging;
 using Microsoft.Build.Execution;
+using System.Xml;
 
 namespace MonoDevelop.Projects.Formats.MSBuild
 {
@@ -64,6 +61,12 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		public void Refresh ()
 		{
 			buildEngine.UnloadProject (file);
+		}
+
+		public void RefreshWithContent (string projectContent)
+		{
+			buildEngine.UnloadProject (file);
+			buildEngine.SetUnsavedProjectContent (file, projectContent);
 		}
 		
 		void LogWriteLine (string txt)
@@ -155,9 +158,15 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		Project ConfigureProject (string file, string configuration, string platform)
 		{			
 			var p = engine.GetLoadedProjects (file).FirstOrDefault ();
-			if (p == null)
-				p = engine.LoadProject (file);
-			
+			if (p == null) {
+				var content = buildEngine.GetUnsavedProjectContent (file);
+				if (content == null)
+					p = engine.LoadProject (file);
+				else {
+					p = engine.LoadProject (new XmlTextReader (new StringReader (content)));
+					p.FullPath = file;
+				}
+			}
 			p.SetProperty ("Configuration", configuration);
 			if (!string.IsNullOrEmpty (platform))
 				p.SetProperty ("Platform", platform);

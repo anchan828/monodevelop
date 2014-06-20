@@ -20,14 +20,21 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <ConsolePause>false</ConsolePause>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\..\build\AddIns\MonoDevelop.AspNet.Mvc\MonoDevelop.AspNet.Mvc.xml</DocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>none</DebugType>
-    <Optimize>false</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
     <OutputPath>..\build</OutputPath>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <ConsolePause>false</ConsolePause>
+    <DebugSymbols>true</DebugSymbols>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\build\MonoDevelop.AspNet.Mvc.xml</DocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.cs" />
@@ -84,7 +91,6 @@
     <Compile Include="gtk-gui\MonoDevelop.AspNet.Mvc.Gui.AddViewDialog.cs" />
     <Compile Include="Gui\AddControllerDialog.cs" />
     <Compile Include="gtk-gui\MonoDevelop.AspNet.Mvc.Gui.AddControllerDialog.cs" />
-    <Compile Include="RazorGenerator\RazorHost.cs" />
     <None Include="Templates\PreprocessedRazorTemplate.xft.xml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -97,6 +103,16 @@
     <Compile Include="RazorEditorParserFixed\RazorResources.Designer.cs" />
     <Compile Include="RazorEditorParserFixed\CommonResources.Designer.cs" />
     <Compile Include="RazorEditorParserFixed\DisposableAction.cs" />
+    <Compile Include="AddinInfo.cs" />
+    <Compile Include="RazorGenerator\MarkupRewriter.cs" />
+    <Compile Include="RazorGenerator\RewritingRazorTemplateEngine.cs" />
+    <Compile Include="RazorGenerator\PreprocessedAttributeRewriter.cs" />
+    <Compile Include="RazorGenerator\PreprocessedRazorHost.cs" />
+    <Compile Include="RazorGenerator\PreprocessedLiteralAttributeCodeGenerator.cs" />
+    <Compile Include="RazorGenerator\PreprocessedAttributeBlockCodeGenerator.cs" />
+    <Compile Include="RazorGenerator\PreprocessedDynamicAttributeBlockCodeGenerator.cs" />
+    <Compile Include="RazorGenerator\RazorWriterHelper.cs" />
+    <Compile Include="RazorGenerator\FileUtil.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -218,8 +234,8 @@
       <Project>{90C99ADB-7D4B-4EB4-98C2-40BD1B14C7D2}</Project>
       <Name>Mono.Debugging</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\..\contrib\NRefactory\Project\NRefactory.csproj">
-      <Project>{3A9AE6AA-BC07-4A2F-972C-581E3AE2F195}</Project>
+    <ProjectReference Include="..\..\..\..\external\nrefactory\ICSharpCode.NRefactory\ICSharpCode.NRefactory.csproj">
+      <Project>{3B2A5653-EC97-4001-BB9B-D90F1AF2C371}</Project>
       <Name>NRefactory</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\MonoDevelop.Refactoring\MonoDevelop.Refactoring.csproj">

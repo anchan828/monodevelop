@@ -36,7 +36,7 @@ namespace MonoDevelop.Ide.Projects
 		private global::Gtk.Label label2;
 		private global::Gtk.Button btn_close;
 		private global::Gtk.Button btn_new;
-		
+
 		protected virtual void Build ()
 		{
 			global::Stetic.Gui.Initialize (this);
@@ -174,6 +174,7 @@ namespace MonoDevelop.Ide.Projects
 			// Container child table1.Gtk.Table+TableChild
 			this.entry_location = new global::MonoDevelop.Components.FolderEntry ();
 			this.entry_location.Name = "entry_location";
+			this.entry_location.DisplayAsRelativePath = false;
 			this.table1.Add (this.entry_location);
 			global::Gtk.Table.TableChild w16 = ((global::Gtk.Table.TableChild)(this.table1 [this.entry_location]));
 			w16.TopAttach = ((uint)(1));

@@ -28,16 +28,12 @@
 using System;
 using System.IO;
 using System.Diagnostics;
-using System.Globalization;
 using System.Collections.Generic;
 using System.CodeDom.Compiler;
 using System.Text.RegularExpressions;
-using System.Xml;
 using MonoDevelop.Core;
-using MonoDevelop.Core.Assemblies;
 using MonoDevelop.Core.Execution;
 using MonoDevelop.Projects.Extensions;
-using MonoDevelop.Projects.Formats.MSBuild;
 using Microsoft.Build.BuildEngine;
 	
 namespace MonoDevelop.Projects.Formats.MD1
@@ -51,9 +47,14 @@ namespace MonoDevelop.Projects.Formats.MD1
 		DotNetProject Project {
 			get { return (DotNetProject) Item; }
 		}
-		
+
 		protected override BuildResult OnBuild (IProgressMonitor monitor, ConfigurationSelector configuration)
 		{
+			if (!Project.InternalCheckNeedsBuild (configuration)) {
+				monitor.Log.WriteLine (GettextCatalog.GetString ("Skipping project since output files are up to date"));
+				return new BuildResult ();
+			}
+
 			DotNetProject project = Project;
 			
 			if (!project.TargetRuntime.IsInstalled (project.TargetFramework)) {

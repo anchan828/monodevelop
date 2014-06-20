@@ -27,22 +27,41 @@
 //
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Web;
 using System.Linq;
+using System.Diagnostics;
+using System.Threading;
+using System.IO.Compression;
+using Mindscape.Raygun4Net;
+using Mindscape.Raygun4Net.Messages;
 
 using MonoDevelop.Core.Logging;
 
 namespace MonoDevelop.Core
 {
-	
 	public static class LoggingService
 	{
+		const string ServiceVersion = "1";
+		const string ReportCrashesKey = "MonoDevelop.LogAgent.ReportCrashes";
+		const string ReportUsageKey = "MonoDevelop.LogAgent.ReportUsage";
+
+		static RaygunClient raygunClient = null;
 		static List<ILogger> loggers = new List<ILogger> ();
 		static RemoteLogger remoteLogger;
 		static DateTime timestamp;
 		static TextWriter defaultError;
 		static TextWriter defaultOut;
+		static bool reporting;
+
+		// Return value is the new value for 'ReportCrashes'
+		// First parameter is the current value of 'ReportCrashes
+		// Second parameter is the exception
+		// Thirdparameter shows if the exception is fatal or not
+		public static Func<bool?, Exception, bool, bool?> UnhandledErrorOccured;
 
 		static LoggingService ()
 		{
@@ -77,6 +96,29 @@ namespace MonoDevelop.Core
 			}
 
 			timestamp = DateTime.Now;
+
+#if ENABLE_RAYGUN
+			string raygunKey = BrandingService.GetString ("RaygunApiKey");
+			if (raygunKey != null) {
+				raygunClient = new RaygunClient (raygunKey);
+			}
+#endif
+
+			//remove the default trace listener on .NET, it throws up horrible dialog boxes for asserts
+			System.Diagnostics.Debug.Listeners.Clear ();
+
+			//add a new listener that just logs failed asserts
+			System.Diagnostics.Debug.Listeners.Add (new AssertLoggingTraceListener ());
+		}
+
+		public static bool? ReportCrashes {
+			get { return PropertyService.Get<bool?> (ReportCrashesKey); }
+			set { PropertyService.Set (ReportCrashesKey, value); }
+		}
+
+		public static bool? ReportUsage {
+			get { return PropertyService.Get<bool?> (ReportUsageKey); }
+			set { PropertyService.Set (ReportUsageKey, value); }
 		}
 
 		static string GenericLogFile {
@@ -107,13 +149,63 @@ namespace MonoDevelop.Core
 			RestoreOutputRedirection ();
 		}
 
+		internal static void ReportUnhandledException (Exception ex, bool willShutDown)
+		{
+			ReportUnhandledException (ex, willShutDown, false, null);
+		}
+
+		internal static void ReportUnhandledException (Exception ex, bool willShutDown, bool silently)
+		{
+			ReportUnhandledException (ex, willShutDown, silently, null);
+		}
+
+		internal static void ReportUnhandledException (Exception ex, bool willShutDown, bool silently, string tag)
+		{
+			var tags = new List<string> { tag };
+
+			if (reporting)
+				return;
+
+			reporting = true;
+			try {
+				var oldReportCrashes = ReportCrashes;
+
+				if (UnhandledErrorOccured != null && !silently)
+					ReportCrashes = UnhandledErrorOccured (ReportCrashes, ex, willShutDown);
+
+				// If crash reporting has been explicitly disabled, disregard this crash
+				if (ReportCrashes.HasValue && !ReportCrashes.Value)
+					return;
+
+				var customData = new Hashtable ();
+				foreach (var cd in SystemInformation.GetDescription ())
+					customData[cd.Title ?? ""] = cd.Description;
+
+				if (raygunClient != null) {
+					ThreadPool.QueueUserWorkItem (delegate {
+						raygunClient.Send (ex, tags, customData, Runtime.Version.ToString ());
+					});
+				}
+
+				//ensure we don't lose the setting
+				if (ReportCrashes != oldReportCrashes) {
+					PropertyService.SaveProperties ();
+				}
+
+			} finally {
+				reporting = false;
+			}
+		}
+
 		static void PurgeOldLogs ()
 		{
 			// Delete all logs older than a week
 			if (!Directory.Exists (UserProfile.Current.LogDir))
 				return;
 
-			var files = Directory.EnumerateFiles (UserProfile.Current.LogDir)
+			// HACK: we were using EnumerateFiles but it's broken in some Mono releases
+			// https://bugzilla.xamarin.com/show_bug.cgi?id=2975
+			var files = Directory.GetFiles (UserProfile.Current.LogDir)
 				.Select (f => new FileInfo (f))
 				.Where (f => f.CreationTimeUtc < DateTime.UtcNow.Subtract (TimeSpan.FromDays (7)));
 
@@ -212,7 +304,7 @@ namespace MonoDevelop.Core
 				return remoteLogger;
 			}
 		}
-		
+
 #region the core service
 		
 		public static bool IsLevelEnabled (LogLevel level)
@@ -287,7 +379,7 @@ namespace MonoDevelop.Core
 		{
 			Log (LogLevel.Fatal, message);
 		}
-		
+
 #endregion
 		
 #region convenience methods (string messageFormat, params object[] args)
@@ -306,12 +398,17 @@ namespace MonoDevelop.Core
 		{
 			Log (LogLevel.Warn, string.Format (messageFormat, args));
 		}
-		
-		public static void LogError (string messageFormat, params object[] args)
+
+		public static void LogUserError (string messageFormat, params object[] args)
 		{
 			Log (LogLevel.Error, string.Format (messageFormat, args));
 		}
 		
+		public static void LogError (string messageFormat, params object[] args)
+		{
+			LogUserError (messageFormat, args);
+		}
+
 		public static void LogFatalError (string messageFormat, params object[] args)
 		{
 			Log (LogLevel.Fatal, string.Format (messageFormat, args));
@@ -338,14 +435,45 @@ namespace MonoDevelop.Core
 		
 		public static void LogError (string message, Exception ex)
 		{
+			LogUserError (message, ex);
+		}
+
+		public static void LogUserError (string message, Exception ex)
+		{
 			Log (LogLevel.Error, message + (ex != null? System.Environment.NewLine + ex.ToString () : string.Empty));
 		}
-		
+
+		public static void LogInternalError (Exception ex)
+		{
+			if (ex != null) {
+				Log (LogLevel.Error, System.Environment.NewLine + ex.ToString ());
+			}
+
+			ReportUnhandledException (ex, false, true, "internal");
+		}
+
+		public static void LogInternalError (string message, Exception ex)
+		{
+			Log (LogLevel.Error, message + (ex != null? System.Environment.NewLine + ex.ToString () : string.Empty));
+
+			ReportUnhandledException (ex, false, true, "internal");
+		}
+
+		public static void LogCriticalError (string message, Exception ex)
+		{
+			Log (LogLevel.Error, message + (ex != null? System.Environment.NewLine + ex.ToString () : string.Empty));
+
+			ReportUnhandledException (ex, false, false, "critical");
+		}
+
 		public static void LogFatalError (string message, Exception ex)
 		{
-			Log (LogLevel.Fatal, message + (ex != null? System.Environment.NewLine + ex.ToString () : string.Empty));
+			Log (LogLevel.Error, message + (ex != null? System.Environment.NewLine + ex.ToString () : string.Empty));
+
+			ReportUnhandledException (ex, true, false, "fatal");
 		}
 
 #endregion
 	}
+
 }

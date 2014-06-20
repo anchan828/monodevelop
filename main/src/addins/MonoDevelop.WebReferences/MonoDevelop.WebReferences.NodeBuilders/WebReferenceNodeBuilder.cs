@@ -1,14 +1,5 @@
 using System;
-using System.IO;
-using System.Collections;
-using MonoDevelop.Projects;
-using MonoDevelop.Core;
-using MonoDevelop.Ide.Commands;
-using MonoDevelop.Components;
-using MonoDevelop.Ide.Gui;
  
-using MonoDevelop.Components.Commands;
-using MonoDevelop.Ide.Gui.Pads;
 using MonoDevelop.WebReferences.Commands;
 using MonoDevelop.Ide.Gui.Components;
 
@@ -33,7 +24,7 @@ namespace MonoDevelop.WebReferences.NodeBuilders
 		}
 		
 		/// <summary>Gets the Addin path for the context menu for the WebReferenceFolderNodeBuilder.</summary>
-		/// <value>A string containing the AddIn path for the context menu for the WebReferenceFolderNodeBuilder.</summary>
+		/// <value>A string containing the AddIn path for the context menu for the WebReferenceFolderNodeBuilder.</value>
 		public override string ContextMenuAddinPath 
 		{
 			get { return "/MonoDevelop/WebReferences/ContextMenu/ProjectPad/WebReferenceItem"; }
@@ -66,19 +57,16 @@ namespace MonoDevelop.WebReferences.NodeBuilders
 		/// <param name="dataObject">An object containing the current activated node.</param> 
 		public override bool HasChildNodes (ITreeBuilder builder, object dataObject)
 		{
-			return false;
+			return true;
 		}
 		
 		/// <summary>Add entries for all the web references in the project to the tree builder.</summary>
-		/// <param name="builder">An ITreeBuilder containing all the data for the current DotNet project.</param>
+		/// <param name="treeBuilder">An ITreeBuilder containing all the data for the current DotNet project.</param>
 		/// <param name="dataObject">An object containing the data for the current node in the tree.</param>
-		public override void BuildChildNodes (ITreeBuilder builder, object dataObject)
+		public override void BuildChildNodes (ITreeBuilder treeBuilder, object dataObject)
 		{
-			/*
-			WebReferenceItem item = (WebReferenceItem) dataObject;
-			builder.AddChild(item.ProxyFile);
-			builder.AddChild(item.MapFile);
-			*/
+			var item = (WebReferenceItem) dataObject;
+			treeBuilder.AddChild(item.MapFile);
 		}
 	}
 }

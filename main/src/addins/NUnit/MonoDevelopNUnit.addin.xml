@@ -1,12 +1,4 @@
-<Addin id          = "NUnit"
-       namespace   = "MonoDevelop"
-       name        = "NUnit support"
-       author      = "Lluis Sanchez, John Luke"
-       copyright   = "MIT X11"
-       url         = "http://monodevelop.com"
-       description = "Integrates NUnit into the MonoDevelop IDE."
-       category    = "Testing"
-       version     = "4.0.1">
+<ExtensionModel>
 
 	<Runtime>
 		<Import assembly="MonoDevelop.NUnit.dll" />
@@ -15,11 +7,6 @@
 		<Import assembly="nunit.framework.dll" />
 		<Import assembly="nunit.util.dll" />
 	</Runtime>
-	
-	<Dependencies>
-		<Addin id="Core" version="4.0.1"/>
-		<Addin id="Ide" version="4.0.1"/>
-	</Dependencies>
 	
 	<!-- Extension Points -->
 
@@ -106,6 +93,9 @@
 			_label = "Run With"
 			type="array"
 			_description="Runs tests using a special execution mode."/>
+		<Command id = "MonoDevelop.NUnit.Commands.TestCommands.DebugTest" 
+			_label = "Debug Test"
+			type="array" />
 		<Command id = "MonoDevelop.NUnit.Commands.TestCommands.RunTest" _label = "Run Test" />
 		<Command id = "MonoDevelop.NUnit.Commands.TestCommands.ShowTestCode" _label = "Show test source code" />
 		<Command id = "MonoDevelop.NUnit.Commands.TestCommands.GoToFailure" _label = "Go to failure" />
@@ -140,6 +130,7 @@
 
 	<Extension path = "/MonoDevelop/NUnit/ContextMenu/TestPad">
 		<CommandItem id = "MonoDevelop.NUnit.Commands.TestCommands.RunTest" />
+		<CommandItem id = "MonoDevelop.NUnit.Commands.TestCommands.DebugTest" />
 		<ItemSet id = "RunTestWith" _label = "Run Test With">
 			<CommandItem id = "MonoDevelop.NUnit.Commands.TestCommands.RunTestWith" />
 		</ItemSet>
@@ -181,17 +172,12 @@
 	</Extension>
 
 	<Extension path = "/MonoDevelop/Ide/ProjectTemplates">
-		<ProjectTemplate id = "NUnitAssemblyGroup" resource = "NUnitAssemblyGroup.xpt.xml"/>
+<!--		<ProjectTemplate id = "NUnitAssemblyGroup" resource = "NUnitAssemblyGroup.xpt.xml"/>-->
 		<ProjectTemplate id = "NUnitProject" resource = "NUnitProject.xpt.xml"/>
 	</Extension>
 
   	<Extension path = "/MonoDevelop/Ide/FileTemplates">
 		<FileTemplate id = "NUnitTestClass" resource = "NUnitTestClass.xft.xml"/>
-	</Extension>
-  
-	<Extension path = "/MonoDevelop/ProjectModel/FileFormats">
-		<FileFormat id="NUnitAssemblyGroupFileFormat"
-		            class="MonoDevelop.NUnit.NUnitAssemblyGroupFileFormat"/>
 	</Extension>
 
 	<Extension path = "/MonoDevelop/NUnit/TestProviders">
@@ -214,9 +200,13 @@
 		<ItemProperty class = "MonoDevelop.Projects.SolutionItemConfiguration"
 			name = "UnitTestInformation" type = "MonoDevelop.NUnit.UnitTestOptionsSet" />
 		<ItemProperty class = "MonoDevelop.Projects.DotNetProject"
-			name = "TestRunnerType" type = "System.String" />
+			name = "TestRunnerType" type = "System.String" external="false" />
 		<ItemProperty class = "MonoDevelop.Projects.DotNetProject"
-			name = "TestRunnerAssembly" type = "MonoDevelop.Core.FilePath" />
+			name = "TestRunnerAssembly" type = "MonoDevelop.Core.FilePath" external="false" />
+		<ItemProperty class = "MonoDevelop.Projects.DotNetProject"
+			name = "TestRunnerCommand" type = "MonoDevelop.Core.FilePath" external="false" />
+		<ItemProperty class = "MonoDevelop.Projects.DotNetProject"
+			name = "TestRunnerArgs" type = "System.String" external="false" />
 	</Extension>
 
-</Addin>
+</ExtensionModel>

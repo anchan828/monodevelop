@@ -46,6 +46,8 @@ using MonoDevelop.Core.Instrumentation;
 using MonoDevelop.Projects.Extensions;
 using Mono.Unix;
 using MonoDevelop.Core.StringParsing;
+using System.Linq;
+using MonoDevelop.Projects.Formats.MSBuild;
 
 namespace MonoDevelop.Projects
 {
@@ -91,7 +93,7 @@ namespace MonoDevelop.Projects
 			AddinManager.AddExtensionNodeHandler (ProjectBindingsExtensionPath, OnProjectsExtensionChanged);
 			AddinManager.ExtensionChanged += OnExtensionChanged;
 			
-			defaultFormat = formatManager.GetFileFormat ("MSBuild10");
+			defaultFormat = formatManager.GetFileFormat (MSBuildProjectService.DefaultFormat);
 		}
 		
 		public DataContext DataContext {
@@ -120,15 +122,18 @@ namespace MonoDevelop.Projects
 					einfo.ItemTypeCondition.ObjType = target.GetType ();
 					einfo.ProjectLanguageCondition.TargetProject = target;
 				}
-				ProjectServiceExtension[] extensions = (ProjectServiceExtension[]) einfo.ExtensionContext.GetExtensionObjects ("/MonoDevelop/ProjectModel/ProjectServiceExtensions", typeof(ProjectServiceExtension));
+				ProjectServiceExtension[] extensions = einfo.ExtensionContext.GetExtensionObjects ("/MonoDevelop/ProjectModel/ProjectServiceExtensions", typeof(ProjectServiceExtension)).Cast<ProjectServiceExtension> ().ToArray ();
 				chain = CreateExtensionChain (extensions);
+
+				// After creating the chain there is no need to keep the reference to the target
+				einfo.ProjectLanguageCondition.TargetProject = null;
 			}
 			else {
 				if (defaultExtensionChain == null) {
 					ExtensionContext ctx = AddinManager.CreateExtensionContext ();
 					ctx.RegisterCondition ("ItemType", new ItemTypeCondition (typeof(UnknownItem)));
 					ctx.RegisterCondition ("ProjectLanguage", new ProjectLanguageCondition (UnknownItem.Instance));
-					ProjectServiceExtension[] extensions = (ProjectServiceExtension[]) ctx.GetExtensionObjects ("/MonoDevelop/ProjectModel/ProjectServiceExtensions", typeof(ProjectServiceExtension));
+					ProjectServiceExtension[] extensions = ctx.GetExtensionObjects ("/MonoDevelop/ProjectModel/ProjectServiceExtensions", typeof(ProjectServiceExtension)).Cast<ProjectServiceExtension> ().ToArray ();
 					defaultExtensionChain = CreateExtensionChain (extensions);
 				}
 				chain = defaultExtensionChain;
@@ -172,16 +177,11 @@ namespace MonoDevelop.Projects
 				defaultTargetFramework = value;
 			}
 		}
-		
+
+		[Obsolete ("Use DefaultFileFormat.Id")]
 		public string DefaultFileFormatId {
 			get { return defaultFormat.Id; }
-			set {
-				FileFormat f = FileFormats.GetFileFormat (value);
-				if (f != null)
-					defaultFormat = f;
-				else
-					LoggingService.LogError ("Unknown format: " + value);
-			}
+			set { /* nop */ }
 		}
 
 		public FileFormat DefaultFileFormat {
@@ -267,9 +267,9 @@ namespace MonoDevelop.Projects
 			}
 		}
 		
-		internal void InternalWriteSolutionItem (IProgressMonitor monitor, string file, SolutionEntityItem item)
+		internal void InternalWriteSolutionItem (IProgressMonitor monitor, FilePath file, SolutionEntityItem item)
 		{
-			string newFile = WriteFile (monitor, file, item, null);
+			var newFile = WriteFile (monitor, file, item, null);
 			if (newFile != null)
 				item.FileName = newFile;
 			else
@@ -290,9 +290,9 @@ namespace MonoDevelop.Projects
 			return item;
 		}
 		
-		internal void InternalWriteWorkspaceItem (IProgressMonitor monitor, string file, WorkspaceItem item)
+		internal void InternalWriteWorkspaceItem (IProgressMonitor monitor, FilePath file, WorkspaceItem item)
 		{
-			string newFile = WriteFile (monitor, file, item, item.FileFormat);
+			var newFile = WriteFile (monitor, file, item, item.FileFormat);
 			if (newFile != null)
 				item.FileName = newFile;
 			else
@@ -314,7 +314,7 @@ namespace MonoDevelop.Projects
 			return obj;
 		}
 		
-		string WriteFile (IProgressMonitor monitor, string file, object item, FileFormat format)
+		FilePath WriteFile (IProgressMonitor monitor, FilePath file, object item, FileFormat format)
 		{
 			if (format == null) {
 				if (defaultFormat.CanWrite (item))
@@ -326,12 +326,12 @@ namespace MonoDevelop.Projects
 				
 				if (format == null)
 					return null;
+
 				file = format.GetValidFileName (item, file);
 			}
 			
-			if (!FileService.RequestFileEdit (file))
-				throw new UserException (GettextCatalog.GetString ("The project could not be saved"), GettextCatalog.GetString ("Write permission has not been granted for file '{0}'", file));
-			
+			FileService.RequestFileEdit (file);
+
 			format.Format.WriteFile (file, item, monitor);
 			return file;
 		}
@@ -501,22 +501,19 @@ namespace MonoDevelop.Projects
 			}
 			throw new InvalidOperationException ("Project type '" + type + "' not found");
 		}
-		
+
+		//TODO: find solution that contains the project if possible
 		public Solution GetWrapperSolution (IProgressMonitor monitor, string filename)
 		{
 			// First of all, check if a solution with the same name already exists
 			
 			FileFormat[] formats = Services.ProjectService.FileFormats.GetFileFormats (filename, typeof(SolutionEntityItem));
 			if (formats.Length == 0)
-				formats = new FileFormat [] { DefaultFileFormat };
+				formats = new  [] { DefaultFileFormat };
 			
 			Solution tempSolution = new Solution ();
 			
-			FileFormat solutionFileFormat;
-			if (formats [0].CanWrite (tempSolution))
-				solutionFileFormat = formats [0];
-			else
-				solutionFileFormat = MonoDevelop.Projects.Formats.MD1.MD1ProjectService.FileFormat;
+			FileFormat solutionFileFormat = formats.FirstOrDefault (f => f.CanWrite (tempSolution)) ?? DefaultFileFormat;
 			
 			string solFileName = solutionFileFormat.GetValidFileName (tempSolution, filename);
 			
@@ -644,6 +641,7 @@ namespace MonoDevelop.Projects
 		
 		public override void Save (IProgressMonitor monitor, SolutionEntityItem entry)
 		{
+			FileService.RequestFileEdit (entry.GetItemFiles (false));
 			entry.OnSave (monitor);
 		}
 		
@@ -787,6 +785,11 @@ namespace MonoDevelop.Projects
 		internal override BuildResult Compile(IProgressMonitor monitor, SolutionEntityItem item, BuildData buildData, ItemCompileCallback callback)
 		{
 			return callback (monitor, item, buildData);
+		}
+
+		public override IEnumerable<string> GetReferencedAssemblies (DotNetProject project, ConfigurationSelector configuration, bool includeProjectReferences)
+		{
+			return project.OnGetReferencedAssemblies (configuration, includeProjectReferences);
 		}
 	}	
 	

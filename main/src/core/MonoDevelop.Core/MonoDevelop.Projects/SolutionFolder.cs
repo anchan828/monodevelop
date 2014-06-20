@@ -199,19 +199,6 @@ namespace MonoDevelop.Projects
 			SetItemHandler (new DummySolutionFolderHandler (this));
 		}
 
-		
-		protected internal override bool OnGetNeedsBuilding (ConfigurationSelector configuration)
-		{
-			foreach (SolutionItem item in Items)
-				if (item.NeedsBuilding (configuration)) return true;
-			return false;
-		}
-		
-		protected internal override void OnSetNeedsBuilding (bool value, ConfigurationSelector configuration)
-		{
-			// Ignore
-		}
-		
 		public override void Dispose()
 		{
 			if (items != null) {
@@ -234,7 +221,15 @@ namespace MonoDevelop.Projects
 				
 				SolutionEntityItem newItem;
 				try {
-					newItem = Services.ProjectService.ReadSolutionItem (monitor, item.FileName);
+					if (ParentSolution.IsSolutionItemEnabled (item.FileName))
+						newItem = Services.ProjectService.ReadSolutionItem (monitor, item.FileName);
+					else {
+						UnknownSolutionItem e = new UnknownSolutionItem () {
+							FileName = item.FileName,
+							UnloadedEntry = true
+						};
+						newItem = e;
+					}
 				} catch (Exception ex) {
 					UnknownSolutionItem e = new UnknownSolutionItem ();
 					e.LoadError = ex.Message;
@@ -249,8 +244,8 @@ namespace MonoDevelop.Projects
 				ConnectChildEntryEvents (newItem);
 	
 				NotifyModified ("Items");
-				OnItemRemoved (new SolutionItemChangeEventArgs (item, ParentSolution, true), true);
-				OnItemAdded (new SolutionItemChangeEventArgs (newItem, ParentSolution, true), true);
+				OnItemRemoved (new SolutionItemChangeEventArgs (item, ParentSolution, true) { ReplacedItem = item } , true);
+				OnItemAdded (new SolutionItemChangeEventArgs (newItem, ParentSolution, true) { ReplacedItem = item }, true);
 				
 				item.Dispose ();
 				return newItem;
@@ -626,7 +621,7 @@ namespace MonoDevelop.Projects
 			}
 			
 			try {
-				List<SolutionItem> toBuild = new List<SolutionItem> (allProjects.Where (p => p.NeedsBuilding (configuration)));
+				List<SolutionItem> toBuild = new List<SolutionItem> (allProjects);
 				
 				monitor.BeginTask (GettextCatalog.GetString ("Building Solution: {0} ({1})", Name, configuration.ToString ()), toBuild.Count);
 
@@ -715,8 +710,11 @@ namespace MonoDevelop.Projects
 		{
 			foreach (Project projectEntry in GetAllProjects()) {
 				foreach (ProjectFile fInfo in projectEntry.Files) {
-					if (fInfo.FilePath == oldName)
+					if (fInfo.FilePath == oldName) {
+						if (fInfo.BuildAction == projectEntry.GetDefaultBuildAction (oldName))
+							fInfo.BuildAction = projectEntry.GetDefaultBuildAction (newName);
 						fInfo.Name = newName;
+					}
 				}
 			}
 		}
@@ -995,6 +993,10 @@ namespace MonoDevelop.Projects
 			get { return false; }
 		}
 		
+		public void OnModified (string hint)
+		{
+		}
+
 		public void Dispose ()
 		{
 		}

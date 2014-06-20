@@ -88,23 +88,12 @@ namespace MonoDevelop.Refactoring
 		{
 			this.Document = doc;
 			if (doc != null && doc.ParsedDocument != null) {
-				Unit = doc.ParsedDocument.GetAst<SyntaxTree> ();
-				resolver = CreateResolver (Unit);
+				var sharedResolver = doc.GetSharedResolver ();
+				if (sharedResolver == null)
+					return;
+				resolver = sharedResolver.Result;
+				Unit = resolver != null ? resolver.RootNode as SyntaxTree : null;
 			}
-		}
-
-		public CSharpAstResolver CreateResolver (SyntaxTree unit)
-		{
-			var parsedDocument = Document.ParsedDocument;
-			if (parsedDocument == null)
-				return null;
-
-			var parsedFile = parsedDocument.ParsedFile as CSharpUnresolvedFile;
-			
-			if (unit == null || parsedFile == null)
-				return null;
-
-			return new CSharpAstResolver (Document.Compilation, unit, parsedFile);
 		}
 
 		public Mono.TextEditor.TextEditorData GetTextEditorData ()
@@ -129,7 +118,7 @@ namespace MonoDevelop.Refactoring
 		public string OutputNode (AstNode node)
 		{
 			using (var stringWriter = new System.IO.StringWriter ()) {
-				var formatter = new TextWriterOutputFormatter (stringWriter);
+				var formatter = new TextWriterTokenWriter (stringWriter);
 //				formatter.Indentation = indentLevel;
 				stringWriter.NewLine = Document.Editor.EolMarker;
 				

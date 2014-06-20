@@ -93,8 +93,9 @@ namespace CBinding
 		private void Init ()
 		{
 			packages.Project = this;
-			
-			IdeApp.Workspace.ItemAddedToSolution += OnEntryAddedToCombine;
+
+			if (IdeApp.IsInitialized)
+				IdeApp.Workspace.ItemAddedToSolution += OnEntryAddedToCombine;
 		}
 		
 		public CProject ()
@@ -202,17 +203,17 @@ namespace CBinding
 		
 		public override IEnumerable<SolutionItem> GetReferencedItems (ConfigurationSelector configuration)
 		{
-			List<string> project_names = new List<string> ();
-			
+			foreach (var p in base.GetReferencedItems (configuration))
+				yield return p;
+
+			if (ParentSolution == null)
+				yield break;
+
 			foreach (Package p in Packages) {
 				if (p.IsProject && p.Name != Name) {
-					project_names.Add (p.Name);
-				}
-			}
-			
-			foreach (SolutionItem e in ParentFolder.Items) {
-				if (e is CProject && project_names.Contains (e.Name)) {
-					yield return e;
+					var cp = ParentSolution.FindProjectByName (p.Name) as CProject;
+					if (cp != null)
+						yield return cp;
 				}
 			}
 		}

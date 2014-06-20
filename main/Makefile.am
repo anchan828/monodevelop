@@ -2,6 +2,8 @@ include $(top_srcdir)/xbuild.include
 
 SUBDIRS = external . contrib src po man theme-icons build tests
 
+MD_CONFIGURE=$(top_srcdir)/../scripts/configure.sh
+
 #capture aclocal flags for autoreconf
 ACLOCAL_AMFLAGS=$(ACLOCAL_FLAGS)
 
@@ -11,29 +13,18 @@ buildinfo = $(top_builddir)/build/bin/buildinfo
 
 all: vcrevision
 
-all-local: sln_build
+all-local: vcrevision sln_build
 
 clean: clean-local
 
 clean-local: sln_clean
 
 vcrevision:
-	@if test -d ../.git; then \
-		version=$$(cd ..; \
-			LANG=C; export LANG; \
-			git rev-parse HEAD; \
-		); \
-		echo "$$version" > "vcrevision"; \
-	else \
-		if test ! -f ./vcrevision; then \
-			echo "unknown" > "vcrevision"; \
-		fi; \
-	fi
+	touch vcrevision
 
-$(buildinfo): vcrevision
+$(buildinfo):
 	@mkdir -p "$(top_builddir)/build/bin"
-	@echo "$$(cat $(top_srcdir)/vcrevision)" > "$@"
-	@echo "Build date: $$(date -u +'%Y-%m-%d %H:%M:%S%z')" >> "$@"
+	@$(MD_CONFIGURE) gen-buildinfo "$(top_builddir)/build/bin"
 	@echo "Updated build information"
 	@cat $(buildinfo)
 
@@ -110,9 +101,11 @@ apidocs:
 	mdassembler --out docs/sources/monodevelop-extension-guide --addins docs/extension-model.xml
 #	cd docs/apiguide && mdassembler --out monodevelop-api-guide --xhtml toc.xhtml && mv monodevelop-api-guide.zip ../web/sources
 
-MD_LAUNCH=$(MD_LAUNCH_SETUP) UBUNTU_MENUPROXY=0 exec -a "monodevelop" $(RUNTIME)
+MD_LAUNCH=$(MD_LAUNCH_SETUP) $(MD_LAUNCH_EXTRA_ENV) UBUNTU_MENUPROXY=0 LIBOVERLAY_SCROLLBAR=0 exec -a "monodevelop" $(RUNTIME)
 
-run: runmd-sgen
+run: run-sgen
+
+run-boehm: runmd
 
 run-sgen: runmd-sgen
 
@@ -149,7 +142,7 @@ plot-trace:
 	python plot-timeline.py -o md-trace.png  md.strace
 
 run-profile-heap: $(PROGRAM)
-	$(MD_LAUNCH) -O=inline --profile=heap:heaplog $(MD_BIN_PATH)/MonoDevelop.exe --no-redirect
+	$(MD_LAUNCH) --profile=log:heapshot=900000ms $(MD_BIN_PATH)/MonoDevelop.exe --no-redirect
 
 check-addins:
 	$(MDTOOL_RUN) setup reg-build -v
@@ -167,7 +160,7 @@ app-dir: all
 
 # we can't use the variables that are conditionally defined
 EXTRA_DIST = $(bin_SCRIPTS) $(desktop_DATA) $(pixmap_DATA) \
-	monodevelop.xml $(pkgconfig_in_files) vcrevision external/Makefile.in \
+	monodevelop.xml $(pkgconfig_in_files) external/Makefile.in \
 	Main.sln \
 	md.targets
 

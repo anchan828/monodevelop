@@ -1,10 +1,12 @@
 // 
 // CommitDialogExtensionWidget.cs
 //  
-// Author:
+// Authors:
 //       Lluis Sanchez Gual <lluis@novell.com>
+//       Andrés G. Aragoneses <knocte@gmail.com>
 // 
 // Copyright (c) 2010 Novell, Inc (http://www.novell.com)
+// Copyright (c) 2013 Andrés G. Aragoneses
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,18 +25,21 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
 using System;
-using MonoDevelop.Ide.Gui;
 using MonoDevelop.Core;
 using MonoDevelop.Projects;
 using MonoDevelop.Ide;
 
 namespace MonoDevelop.VersionControl.Git
 {
-	public class GitCommitDialogExtension: CommitDialogExtension
+	sealed class GitCommitDialogExtension: CommitDialogExtension
 	{
 		GitCommitDialogExtensionWidget widget;
-		
+
+		Gtk.TextView textView;
+		Gtk.TextTag overflowTextTag;
+
 		public override bool Initialize (ChangeSet changeSet)
 		{
 			if (changeSet.Repository is GitRepository) {
@@ -46,8 +51,8 @@ namespace MonoDevelop.VersionControl.Git
 					AllowCommit = widget.CommitterIsAuthor || widget.AuthorName.Length > 0;
 				};
 				return true;
-			} else
-				return false;
+			}
+			return false;
 		}
 		
 		public override bool OnBeginCommit (ChangeSet changeSet)
@@ -55,17 +60,10 @@ namespace MonoDevelop.VersionControl.Git
 			// In this callback we check if the user information configured in Git
 			// matches the user information configured in MonoDevelop. If the configurations
 			// don't match, it shows a dialog asking the user what to do.
-			
+
 			GitRepository repo = (GitRepository) changeSet.Repository;
-			
-			if (!widget.CommitterIsAuthor) {
-				if (widget.AuthorName.Length > 0)
-					changeSet.ExtendedProperties ["Git.AuthorName"] = widget.AuthorName;
-				if (widget.AuthorMail.Length > 0)
-					changeSet.ExtendedProperties ["Git.AuthorEmail"] = widget.AuthorMail;
-			}
-			
 			Solution sol = null;
+
 			// Locate the solution to which the changes belong
 			foreach (Solution s in IdeApp.Workspace.GetAllSolutions ()) {
 				if (s.BaseDirectory == changeSet.BaseLocalPath || changeSet.BaseLocalPath.IsChildPathOf (s.BaseDirectory)) {
@@ -75,20 +73,40 @@ namespace MonoDevelop.VersionControl.Git
 			}
 			if (sol == null)
 				return true;
+
+			if (!widget.CommitterIsAuthor) {
+				if (widget.AuthorName.Length > 0)
+					changeSet.ExtendedProperties ["Git.AuthorName"] = widget.AuthorName;
+				if (widget.AuthorMail.Length > 0)
+					changeSet.ExtendedProperties ["Git.AuthorEmail"] = widget.AuthorMail;
+				return true;
+			}
+
+			string user;
+			string email;
+			repo.GetUserInfo (out user, out email);
 			
 			string val = sol.UserProperties.GetValue<string> ("GitUserInfo");
 			if (val == "UsingMD") {
 				// If the solution is configured to use the MD configuration, make sure the Git config is up to date.
-				string user;
-				string email;
-				repo.GetUserInfo (out user, out email);
 				if (user != sol.AuthorInformation.Name || email != sol.AuthorInformation.Email)
 					repo.SetUserInfo (sol.AuthorInformation.Name, sol.AuthorInformation.Email);
 			}
 			else if (val != "UsingGIT") {
-				string user;
-				string email;
-				repo.GetUserInfo (out user, out email);
+				if (repo.IsUserInfoDefault ()) {
+					var dlg = new UserGitConfigDialog ();
+					try {
+						if (MessageService.RunCustomDialog (dlg) == (int) Gtk.ResponseType.Ok) {
+							user = dlg.UserText;
+							email = dlg.EmailText;
+							repo.SetUserInfo (dlg.UserText, dlg.EmailText);
+						} else
+							return false;
+					} finally {
+						dlg.Destroy ();
+					}
+				}
+
 				if (user != sol.AuthorInformation.Name || email != sol.AuthorInformation.Email) {
 					// There is a conflict. Ask the user what to do
 					string gitInfo = GetDesc (user, email);
@@ -114,7 +132,7 @@ namespace MonoDevelop.VersionControl.Git
 			return true;
 		}
 		
-		string GetDesc (string name, string email)
+		static string GetDesc (string name, string email)
 		{
 			if (string.IsNullOrEmpty (name) && string.IsNullOrEmpty (email))
 				return "Not configured";
@@ -129,6 +147,48 @@ namespace MonoDevelop.VersionControl.Git
 		{
 			if (success && widget.PushAfterCommit)
 				GitService.Push ((GitRepository) changeSet.Repository);
+		}
+
+		public override void CommitMessageTextViewHook (Gtk.TextView textView)
+		{
+			this.textView = textView;
+			overflowTextTag = new Gtk.TextTag ("overflow");
+			overflowTextTag.Foreground = "red";
+			overflowTextTag.ForegroundSet = true;
+			textView.Buffer.TagTable.Add (overflowTextTag);
+			textView.Buffer.Changed += OnTextChanged;
+		}
+
+		void OnTextChanged (object source, EventArgs args)
+		{
+			HighlightTextIfTooLong ();
+		}
+
+		const int maxLengthConventionForFirstLineOfCommitMessage = 50;
+
+		void HighlightTextIfTooLong ()
+		{
+			Gtk.TextIter start, end, unused;
+			textView.Buffer.GetBounds (out start, out end);
+			textView.Buffer.RemoveTag (overflowTextTag, start, end);
+
+			var text = textView.Buffer.Text;
+			var lines = text.Split ('\n');
+			if (lines.Length > 0 && lines [0].Length > maxLengthConventionForFirstLineOfCommitMessage) {
+				textView.TooltipText = String.Format (GettextCatalog.GetString (
+					"When using GIT, it is not recommended to surpass the character count of {0} in the first line of the commit message"),
+					maxLengthConventionForFirstLineOfCommitMessage);
+				textView.HasTooltip = true;
+
+				textView.Buffer.GetBounds (out start, out unused);
+				start.ForwardChars (maxLengthConventionForFirstLineOfCommitMessage);
+
+				textView.Buffer.GetBounds (out end, out unused);
+				end.ForwardChars (lines [0].Length);
+				textView.Buffer.ApplyTag (overflowTextTag, start, end);
+			} else {
+				textView.HasTooltip = false;
+			}
 		}
 	}
 }

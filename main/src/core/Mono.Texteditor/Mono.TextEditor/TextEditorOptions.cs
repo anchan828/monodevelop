@@ -60,10 +60,9 @@ namespace Mono.TextEditor
 		bool highlightCaretLine = false;
 		bool removeTrailingWhitespaces = true;
 		bool allowTabsAfterNonTabs = true;
-		bool useAntiAliasing = true;
 		string fontName = DEFAULT_FONT;
-		string colorStyle = "text";
-		Pango.FontDescription font;
+		string colorStyle = "Default";
+		Pango.FontDescription font, gutterFont;
 		
 		double zoom = 1d;
 		IWordFindStrategy wordFindStrategy = new EmacsWordFindStrategy (true);
@@ -351,6 +350,11 @@ namespace Mono.TextEditor
 				font.Dispose ();
 				font = null;
 			}
+
+			if (gutterFont != null) {
+				gutterFont.Dispose ();
+				gutterFont = null;
+			}
 		}
 
 		
@@ -382,7 +386,38 @@ namespace Mono.TextEditor
 				return font;
 			}
 		}
-		
+		string gutterFontName;
+		public virtual string GutterFontName {
+			get {
+				return gutterFontName;
+			}
+			set {
+				if (gutterFontName != value) {
+					DisposeFont ();
+					gutterFontName = value;
+					OnChanged (EventArgs.Empty);
+				}
+			}
+		}
+
+		public Pango.FontDescription GutterFont {
+			get {
+				if (gutterFont == null) {
+					try {
+						if (!string.IsNullOrEmpty (GutterFontName))
+							gutterFont = Pango.FontDescription.FromString (GutterFontName);
+					} catch {
+						Console.WriteLine ("Could not load gutter font: {0}", GutterFontName);
+					}
+					if (gutterFont == null || String.IsNullOrEmpty (gutterFont.Family))
+						gutterFont = Gtk.Widget.DefaultStyle.FontDescription.Copy ();
+					if (gutterFont != null)
+						gutterFont.Size = (int)(gutterFont.Size * Zoom);
+				}
+				return gutterFont;
+			}
+		}
+
 		public virtual string ColorScheme {
 			get {
 				return colorStyle;
@@ -408,18 +443,6 @@ namespace Mono.TextEditor
 			}
 		}
 		
-		public virtual bool UseAntiAliasing {
-			get {
-				return useAntiAliasing;
-			}
-			set {
-				if (useAntiAliasing != value) {
-					useAntiAliasing = value;
-					OnChanged (EventArgs.Empty);
-				}
-			}
-		}
-
 		bool drawIndentationMarkers = false;
 		public virtual bool DrawIndentationMarkers {
 			get {
@@ -446,10 +469,22 @@ namespace Mono.TextEditor
 			}
 		}
 
+		IncludeWhitespaces includeWhitespaces = IncludeWhitespaces.All;
+		public virtual IncludeWhitespaces IncludeWhitespaces {
+			get {
+				return includeWhitespaces;
+			}
+			set {
+				if (includeWhitespaces != value) {
+					includeWhitespaces = value;
+					OnChanged (EventArgs.Empty);
+				}
+			}
+		}
+
 		bool wrapLines = false;
 		public virtual bool WrapLines {
 			get {
-				// Doesn't work atm
 				return false;
 //				return wrapLines;
 			}
@@ -487,6 +522,19 @@ namespace Mono.TextEditor
 			}
 		}
 
+		bool generateFormattingUndoStep;
+		public virtual bool GenerateFormattingUndoStep {
+			get {
+				return generateFormattingUndoStep;
+			}
+			set {
+				if (generateFormattingUndoStep != value) {
+					generateFormattingUndoStep = value;
+					OnChanged (EventArgs.Empty);
+				}
+			}
+		}
+
 		public virtual ColorScheme GetColorStyle ()
 		{
 			return SyntaxModeService.GetColorStyle (ColorScheme);
@@ -512,9 +560,10 @@ namespace Mono.TextEditor
 			overrideDocumentEolMarker = other.overrideDocumentEolMarker;
 			defaultEolMarker = other.defaultEolMarker;
 			enableAnimations = other.enableAnimations;
-			useAntiAliasing = other.useAntiAliasing;
 			drawIndentationMarkers = other.drawIndentationMarkers;
 			showWhitespaces = other.showWhitespaces;
+			includeWhitespaces = other.includeWhitespaces;
+			generateFormattingUndoStep = other.generateFormattingUndoStep;
 			DisposeFont ();
 			OnChanged (EventArgs.Empty);
 		}

@@ -1,22 +1,4 @@
-<Addin id          = "WindowsPlatform"
-       namespace   = "MonoDevelop"
-       name        = "MonoDevelop Windows Platform Support"
-       author      = "Jonathan Pobst"
-       copyright   = "MIT X11"
-       url         = "http://monodevelop.com/"
-       description = "Windows Platform Support for MonoDevelop"
-       category    = "Platform Support"
-       version     = "4.0.1">
-
-	<Runtime>
-		<Import assembly="WindowsPlatform.dll"/>
-	</Runtime>
-
-	<Dependencies>
-		<Addin id="Core" version="4.0.1"/>
-		<Addin id="Ide" version="4.0.1"/>
-  </Dependencies>
-
+<ExtensionModel>
 
 	<Extension path = "/MonoDevelop/Core/PlatformService">
 		<Class class = "MonoDevelop.Platform.WindowsPlatform"/>
@@ -24,6 +6,14 @@
 
 	<Extension path = "/MonoDevelop/Ide/InitCompleteHandlers">
 		<Class class="MonoDevelop.Platform.JumpList" />
+	</Extension>
+
+	<Extension path = "/MonoDevelop/Core/WebCredentialProviders">
+		<Class class = "MonoDevelop.Platform.Windows.WindowsProxyCredentialProvider" />
+	</Extension>
+
+	<Extension path = "/MonoDevelop/Core/PasswordProvider">
+		<Class class = "MonoDevelop.Platform.Windows.WindowsSecureStoragePasswordProvider" />
 	</Extension>
 <!--
   <Extension path = "/MonoDevelop/Components/DialogHandlers">
@@ -33,4 +23,4 @@
   </Extension>
 -->
 
-</Addin>
+</ExtensionModel>

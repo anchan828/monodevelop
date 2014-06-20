@@ -40,6 +40,7 @@ using MonoDevelop.Projects;
 using MonoDevelop.Core.Serialization;
 using MonoDevelop.Core.StringParsing;
 using MonoDevelop.Core.Execution;
+using MonoDevelop.Projects.Extensions;
 
 namespace MonoDevelop.Projects
 {
@@ -109,6 +110,10 @@ namespace MonoDevelop.Projects
 				if (oldName != Name)
 					OnNameChanged (new WorkspaceItemRenamedEventArgs (this, oldName, Name));
 				NotifyModified ();
+
+				// Load the user properties after the file name has been set.
+				if (Loading)
+					LoadUserProperties ();
 			}
 		}
 
@@ -294,30 +299,31 @@ namespace MonoDevelop.Projects
 			return Services.ProjectService.GetExtensionChain (this).GetExecutionTargets (this, configuration);
 		}
 
+		[Obsolete ("This method will be removed in future releases")]
 		public bool NeedsBuilding (string configuration)
 		{
-			return NeedsBuilding ((SolutionConfigurationSelector) configuration);
+			return true;
 		}
 		
+		[Obsolete ("This method will be removed in future releases")]
 		public bool NeedsBuilding (ConfigurationSelector configuration)
 		{
-			return Services.ProjectService.GetExtensionChain (this).GetNeedsBuilding (this, configuration);
+			return true;
 		}
 		
+		[Obsolete ("This method will be removed in future releases")]
 		public void SetNeedsBuilding (bool value)
 		{
-			foreach (string conf in GetConfigurations ())
-				SetNeedsBuilding (value, new SolutionConfigurationSelector (conf));
 		}
 		
+		[Obsolete ("This method will be removed in future releases")]
 		public void SetNeedsBuilding (bool needsBuilding, string configuration)
 		{
-			SetNeedsBuilding (needsBuilding, (SolutionConfigurationSelector) configuration);
 		}
 		
+		[Obsolete ("This method will be removed in future releases")]
 		public void SetNeedsBuilding (bool needsBuilding, ConfigurationSelector configuration)
 		{
-			Services.ProjectService.GetExtensionChain (this).SetNeedsBuilding (this, needsBuilding, configuration);
 		}
 		
 		public virtual FileFormat FileFormat {
@@ -427,7 +433,7 @@ namespace MonoDevelop.Projects
 
 		internal protected virtual bool OnGetNeedsBuilding (ConfigurationSelector configuration)
 		{
-			return false;
+			return true;
 		}
 		
 		internal protected virtual void OnSetNeedsBuilding (bool val, ConfigurationSelector configuration)
@@ -453,7 +459,6 @@ namespace MonoDevelop.Projects
 		
 		protected virtual void OnEndLoad ()
 		{
-			LoadUserProperties ();
 		}
 		
 		public virtual void LoadUserProperties ()
@@ -651,12 +656,12 @@ namespace MonoDevelop.Projects
 			}
 			set {
 //				needsReload = value;
-				reloadCheckTime.Clear ();
-				foreach (FilePath file in item.GetItemFiles (false)) {
-					if (value)
+				if (value) {
+					reloadCheckTime.Clear ();
+					foreach (FilePath file in item.GetItemFiles (false))
 						reloadCheckTime [file] = DateTime.MinValue;
-					else
-						reloadCheckTime [file] = GetLastWriteTime (file);
+				} else {
+					ResetLoadTimes ();
 				}
 			}
 		}

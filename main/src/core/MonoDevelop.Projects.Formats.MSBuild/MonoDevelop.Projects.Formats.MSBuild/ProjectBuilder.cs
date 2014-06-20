@@ -25,14 +25,15 @@
 // THE SOFTWARE.
 
 using System;
-using System.Threading;
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Runtime.Remoting;
 using Microsoft.Build.BuildEngine;
 using Microsoft.Build.Framework;
 using System.Collections.Generic;
 using System.Collections;
+using System.Reflection;
+
+//this is the builder for the deprecated build engine API
+#pragma warning disable 618
 
 namespace MonoDevelop.Projects.Formats.MSBuild
 {
@@ -50,19 +51,24 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			this.engine = engine;
 			this.buildEngine = buildEngine;
 			consoleLogger = new MDConsoleLogger (LoggerVerbosity.Normal, LogWriteLine, null, null);
-			Refresh ();
 		}
 
 		public void Dispose ()
 		{
-			buildEngine.UnloadProject (file);
+			buildEngine.UnloadProject (engine, file, true);
 		}
 		
 		public void Refresh ()
 		{
-			buildEngine.UnloadProject (file);
+			buildEngine.UnloadProject (engine, file, false);
 		}
 		
+		public void RefreshWithContent (string projectContent)
+		{
+			buildEngine.UnloadProject (engine, file, false);
+			buildEngine.SetUnsavedProjectContent (file, projectContent);
+		}
+
 		void LogWriteLine (string txt)
 		{
 			if (currentLogWriter != null)
@@ -145,7 +151,21 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 				var p = engine.GetLoadedProject (pc.ProjectFile);
 				if (p == null) {
 					p = new Project (engine);
-					p.Load (pc.ProjectFile);
+					var content = buildEngine.GetUnsavedProjectContent (pc.ProjectFile);
+					if (content == null)
+						p.Load (pc.ProjectFile);
+					else {
+						p.FullFileName = pc.ProjectFile;
+
+						if (HasXbuildFileBug ()) {
+							// Workaround for Xamarin bug #14295: Project.Load incorrectly resets the FullFileName property
+							var t = p.GetType ();
+							t.InvokeMember ("PushThisFileProperty", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.InvokeMethod, null, p, new object[] { p.FullFileName });
+							t.InvokeMember ("DoLoad", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.InvokeMethod, null, p, new object[] { new StringReader (content) });
+						} else {
+							p.Load (new StringReader (content));
+						}
+					}
 				}
 				p.GlobalProperties.SetProperty ("Configuration", pc.Configuration);
 				if (!string.IsNullOrEmpty (pc.Platform))
@@ -158,6 +178,19 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 
 			Environment.CurrentDirectory = Path.GetDirectoryName (file);
 			return project;
+		}
+
+		bool? hasXbuildFileBug;
+
+		bool HasXbuildFileBug ()
+		{
+			if (hasXbuildFileBug == null) {
+				Project p = new Project ();
+				p.FullFileName = "foo";
+				p.LoadXml ("<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\"/>");
+				hasXbuildFileBug = p.FullFileName.Length == 0;
+			}
+			return hasXbuildFileBug.Value;
 		}
 		
 		public override object InitializeLifetimeService ()

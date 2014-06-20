@@ -47,7 +47,7 @@ using ICSharpCode.NRefactory.TypeSystem.Implementation;
 
 namespace MonoDevelop.CSharp.Refactoring
 {
-	public class CSharpCodeGenerator : CodeGenerator
+	class CSharpCodeGenerator : CodeGenerator
 	{
 		static CSharpAmbience ambience = new CSharpAmbience ();
 		
@@ -56,7 +56,7 @@ namespace MonoDevelop.CSharp.Refactoring
 		public MonoDevelop.CSharp.Formatting.CSharpFormattingPolicy Policy {
 			get {
 				if (policy == null) {
-					var types = MonoDevelop.Ide.DesktopService.GetMimeTypeInheritanceChain (CSharpFormatter.MimeType);
+					var types = MonoDevelop.Ide.DesktopService.GetMimeTypeInheritanceChain (MonoDevelop.CSharp.Formatting.CSharpFormatter.MimeType);
 					if (PolicyParent != null)
 						policy = PolicyParent.Get<CSharpFormattingPolicy> (types);
 					if (policy == null) {
@@ -74,7 +74,7 @@ namespace MonoDevelop.CSharp.Refactoring
 			}
 			set {
 				base.PolicyParent = value;
-				var types = MonoDevelop.Ide.DesktopService.GetMimeTypeInheritanceChain (CSharpFormatter.MimeType);
+				var types = MonoDevelop.Ide.DesktopService.GetMimeTypeInheritanceChain (MonoDevelop.CSharp.Formatting.CSharpFormatter.MimeType);
 				policy = value.Get<CSharpFormattingPolicy> (types);
 			}
 		}
@@ -90,7 +90,7 @@ namespace MonoDevelop.CSharp.Refactoring
 
 			public string GetShortType (string ns, string name, int typeArguments = 0)
 			{
-				if (Document.ParsedDocument == null)
+				if (Document == null || Document.ParsedDocument == null)
 					return ns + "." + name;
 				var typeDef = new GetClassTypeReference (ns, name, typeArguments).Resolve (Document.Compilation.TypeResolveContext);
 				if (typeDef == null)
@@ -132,8 +132,8 @@ namespace MonoDevelop.CSharp.Refactoring
 			var obsoleteRef = ReflectionHelper.ParseReflectionName ("System.ObsoleteAttribute");
 			var resolvedType = obsoleteRef.Resolve (options.ImplementingType.Compilation);
 			var shortType = resolvedType.Kind != TypeKind.Unknown ? CreateShortType (options.ImplementingType.Compilation, file, loc, resolvedType) : null;
-			var text = shortType != null ? shortType.GetText () : "System.Obsolete";
-			if (text.EndsWith ("Attribute"))
+			var text = shortType != null ? shortType.ToString () : "System.Obsolete";
+			if (text.EndsWith ("Attribute", StringComparison.Ordinal))
 				text = text.Substring (0, text.Length - "Attribute".Length);
 			result.Append (text);
 			if (!string.IsNullOrEmpty (reason)) {
@@ -159,11 +159,7 @@ namespace MonoDevelop.CSharp.Refactoring
 			ITypeResolveContext ctx;
 
 			var doc = IdeApp.Workbench.GetDocument (part.Region.FileName);
-			if (doc != null) {
-				ctx = doc.ParsedDocument.GetTypeResolveContext (doc.Compilation, implementingType.Region.Begin);
-			} else {
-				ctx = new CSharpTypeResolveContext (implementingType.Compilation.MainAssembly, null, implementingType, null);
-			}
+			ctx = new CSharpTypeResolveContext (implementingType.Compilation.MainAssembly, null, implementingType, null);
 			options.Document = doc;
 
 			if (member is IUnresolvedMethod)
@@ -286,7 +282,7 @@ namespace MonoDevelop.CSharp.Refactoring
 			var def = type.GetDefinition ();
 			if (def != null) {
 				using (var stringWriter = new System.IO.StringWriter ()) {
-					var formatter = new TextWriterOutputFormatter (stringWriter);
+					var formatter = new TextWriterTokenWriter (stringWriter);
 					stringWriter.NewLine = EolMarker; 
 					var visitor = new CSharpOutputVisitor (formatter, FormattingOptionsFactory.CreateMono ());
 					var shortType = CreateShortType (def.Compilation, file, loc, resolved);
@@ -383,17 +379,20 @@ namespace MonoDevelop.CSharp.Refactoring
 			bodyEndOffset = result.Length;
 			AppendLine (result);
 		}
-		
+
+		internal static string[] MonoTouchComments = {
+			" NOTE: Don't call the base implementation on a Model class",
+			" see http://docs.xamarin.com/guides/ios/application_fundamentals/delegates,_protocols,_and_events"
+		};
+
 		void AppendMonoTouchTodo (StringBuilder result, CodeGenerationOptions options, out int bodyStartOffset, out int bodyEndOffset)
 		{
 			AppendIndent (result);
 			bodyStartOffset = result.Length;
-			result.AppendLine ("// NOTE: Don't call the base implementation on a Model class");
-			
-			AppendIndent (result);
-			result.AppendLine ("// see http://docs.xamarin.com/ios/tutorials/Events%2c_Protocols_and_Delegates ");
-
-			AppendIndent (result);
+			foreach (var cmt in MonoTouchComments) {
+				result.AppendLine ("//" + cmt);
+				AppendIndent (result);
+			}
 			result.Append ("throw new ");
 			result.Append (options.GetShortType ("System", "NotImplementedException"));
 
@@ -501,7 +500,15 @@ namespace MonoDevelop.CSharp.Refactoring
 					if (options.ImplementingType.Properties.Any ()) 
 						result.Append (": ");
 					int i = 0;
+					var properties = new List<IProperty> ();
+
 					foreach (IProperty property in options.ImplementingType.Properties) {
+						if (properties.Any (p => p.Name == property.Name))
+							continue;
+						properties.Add (property); 
+					}
+
+					foreach (IProperty property in properties) {
 						if (property.IsStatic || !property.IsPublic)
 							continue;
 						if (i > 0)
@@ -512,7 +519,7 @@ namespace MonoDevelop.CSharp.Refactoring
 						result.Append ("}");
 					}
 					result.Append ("]\"");
-					foreach (IProperty property in options.ImplementingType.Properties) {
+					foreach (IProperty property in properties) {
 						if (property.IsStatic || !property.IsPublic)
 							continue;
 						result.Append (", ");
@@ -554,9 +561,9 @@ namespace MonoDevelop.CSharp.Refactoring
 										astBuilder.AddMethod (m);
 										
 										astBuilder.RunTransformations (o => false);
-										
+
 										var visitor = new ThrowsExceptionVisitor ();
-										astBuilder.CompilationUnit.AcceptVisitor (visitor);
+										astBuilder.SyntaxTree.AcceptVisitor (visitor);
 										skipBody = visitor.Throws;
 										if (skipBody)
 											break;
@@ -628,7 +635,42 @@ namespace MonoDevelop.CSharp.Refactoring
 				AppendReturnType (result, options, p.Type);
 				result.Append (" ");
 				result.Append (CSharpAmbience.FilterName (p.Name));
+				if (p.ConstantValue != null) {
+					result.Append (" = ");
+					if (p.Type.Kind == TypeKind.Enum) {
+						bool found = false;
+						foreach (var literal in GetEnumLiterals(p.Type)) {
+							if (literal.ConstantValue.Equals (p.ConstantValue)) {
+								AppendReturnType (result, options, p.Type);
+								result.Append ("."+ literal.Name);
+								found = true;
+								break;
+							}
+						}
+						if (!found) {
+							result.Append ("(");
+							AppendReturnType (result, options, p.Type);
+							result.Append (")" + p.ConstantValue); 
+						}
+					} else if (p.ConstantValue is char) {
+						result.Append ("'" + p.ConstantValue + "'");
+					} else if (p.ConstantValue is string)  {
+						result.Append ("\"" + CSharpTextEditorIndentation.ConvertToStringLiteral ((string)p.ConstantValue) + "\"");
+					} else if (p.ConstantValue is bool)  {
+						result.Append ((bool)p.ConstantValue ? "true" : "false");
+					} else {
+						result.Append (p.ConstantValue);
+					}
+				} 
 			}
+		}
+
+		public IEnumerable<IField> GetEnumLiterals(IType type)
+		{
+			if (type.Kind != TypeKind.Enum)
+				throw new ArgumentException ("Type is no enum.");
+			foreach (var field in type.GetFields (f => f.IsConst && f.IsPublic))
+				yield return field;
 		}
 		
 		static string GetModifiers (ITypeDefinition implementingType, IUnresolvedTypeDefinition implementingPart, IMember member)
@@ -667,7 +709,6 @@ namespace MonoDevelop.CSharp.Refactoring
 			if (options.ExplicitDeclaration || options.ImplementingType.Kind == TypeKind.Interface)
 				return;
 			result.Append (GetModifiers (options.ImplementingType, options.Part, member));
-			
 			bool isFromInterface = false;
 			if (member.DeclaringType != null && member.DeclaringTypeDefinition.Kind == TypeKind.Interface) {
 				isFromInterface = true;
@@ -676,7 +717,7 @@ namespace MonoDevelop.CSharp.Refactoring
 //					foreach (var type in options.ImplementingType.BaseTypes) {
 //						if (type.Kind == TypeKind.Interface)
 //							continue;
-//						if (type.Members.Any (m => m.Name == member.Name && member.EntityType == m.EntityType /* && DomMethod.ParameterListEquals (member.Parameters, m.Parameters)*/ )) {
+//						if (type.Members.Any (m => m.Name == member.Name && member.SymbolKind == m.SymbolKind /* && DomMethod.ParameterListEquals (member.Parameters, m.Parameters)*/ )) {
 //							isFromInterface = false;
 //							break;
 //						}
@@ -686,6 +727,8 @@ namespace MonoDevelop.CSharp.Refactoring
 
 			if (!isFromInterface && member.IsOverridable)
 				result.Append ("override ");
+			if (member is IMethod && ((IMethod)member).IsAsync)
+				result.Append ("async ");
 		}
 		
 		CodeGeneratorMemberResult GenerateCode (IProperty property, CodeGenerationOptions options)
@@ -723,7 +766,7 @@ namespace MonoDevelop.CSharp.Refactoring
 					} else {
 						AppendIndent (result);
 						bodyStartOffset = result.Length;
-						if (property.EntityType == EntityType.Indexer) {
+						if (property.SymbolKind == SymbolKind.Indexer) {
 							result.Append ("return base[");
 							if (property.Parameters.Count > 0)
 								result.Append (CSharpAmbience.FilterName (property.Parameters.First ().Name));
@@ -757,7 +800,7 @@ namespace MonoDevelop.CSharp.Refactoring
 					} else {
 						AppendIndent (result);
 						bodyStartOffset = result.Length;
-						if (property.EntityType == EntityType.Indexer) {
+						if (property.SymbolKind == SymbolKind.Indexer) {
 							result.Append ("base[");
 							if (property.Parameters.Count > 0)
 								result.Append (CSharpAmbience.FilterName (property.Parameters.First ().Name));
@@ -779,7 +822,7 @@ namespace MonoDevelop.CSharp.Refactoring
 			return new CodeGeneratorMemberResult (result.ToString (), regions);
 		}
 		
-		static bool IsMonoTouchModelMember (IMember member)
+		internal static bool IsMonoTouchModelMember (IMember member)
 		{
 			if (member == null || member.DeclaringType == null)
 				return false;
@@ -802,7 +845,7 @@ namespace MonoDevelop.CSharp.Refactoring
 				ImplementingType = field.DeclaringTypeDefinition,
 				Part = implementingType
 			};
-			
+			result.Append ("public ");
 			AppendReturnType (result, options, field.ReturnType);
 			result.Append (" ");
 			result.Append (propertyName);
@@ -847,6 +890,12 @@ namespace MonoDevelop.CSharp.Refactoring
 		}
 		
 		static bool InsertUsingAfter (AstNode node)
+		{
+			return node is NewLineNode && IsCommentOrUsing (node.GetNextSibling (s => !(s is NewLineNode))) ||
+				IsCommentOrUsing (node);
+		}
+
+		static bool IsCommentOrUsing (AstNode node)
 		{
 			return node is ICSharpCode.NRefactory.CSharp.Comment ||
 				node is UsingDeclaration ||
@@ -975,7 +1024,7 @@ namespace MonoDevelop.CSharp.Refactoring
 		{
 			using (var stringWriter = new System.IO.StringWriter ()) {
 //				formatter.Indentation = indentLevel;
-				var formatter = new TextWriterOutputFormatter (stringWriter);
+				var formatter = new TextWriterTokenWriter (stringWriter);
 				stringWriter.NewLine = doc.Editor.EolMarker;
 				
 				var visitor = new CSharpOutputVisitor (formatter, doc.GetFormattingOptions ());
@@ -994,55 +1043,11 @@ namespace MonoDevelop.CSharp.Refactoring
 		
 		public override void CompleteStatement (MonoDevelop.Ide.Gui.Document doc)
 		{
-			var file = doc.Editor;
-			var caretLocation = file.Caret.Location;
-			
-			int pos = file.LocationToOffset (caretLocation.Line + 1, 1);
-			var line = new StringBuilder ();
-			int lineNr = caretLocation.Line + 1, column = 1, maxColumn = 1, lastPos = pos;
-			if (true) 
-				while (lineNr == caretLocation.Line + 1) {
-					maxColumn = column;
-					lastPos = pos;
-					line.Append (file.GetCharAt (pos));
-					pos++;
-					var loc = file.OffsetToLocation (pos);
-					lineNr = loc.Line;
-					column = loc.Column;
-				}
-			string trimmedline = line.ToString ().Trim ();
-			string indent = line.ToString ().Substring (0, line.Length - line.ToString ().TrimStart (' ', '\t').Length);
-			if (trimmedline.EndsWith (";") || trimmedline.EndsWith ("{")) {
-				file.Caret.Location = caretLocation;
-				return;
+			var fixer = new ConstructFixer (doc.GetFormattingOptions (), doc.Editor.CreateNRefactoryTextEditorOptions ());
+			int newOffset;
+			if (fixer.TryFix (doc.Editor.Document, doc.Editor.Caret.Offset, out newOffset)) {
+				doc.Editor.Caret.Offset = newOffset;
 			}
-			int caretLine = caretLocation.Line;
-			int caretColumn = caretLocation.Column;
-			if (trimmedline.StartsWith ("if") || 
-				trimmedline.StartsWith ("while") ||
-				trimmedline.StartsWith ("switch") ||
-				trimmedline.StartsWith ("for") ||
-				trimmedline.StartsWith ("foreach")) {
-				if (!trimmedline.EndsWith (")")) {
-					file.Insert (lastPos, " () {" + file.EolMarker + indent + file.Options.IndentationString + file.EolMarker + indent + "}");
-					caretColumn = maxColumn + 1;
-				} else {
-					file.Insert (lastPos, " {" + file.EolMarker + indent + file.Options.IndentationString + file.EolMarker + indent + "}");
-					caretColumn = indent.Length + 1;
-					caretLine++;
-				}
-			} else if (trimmedline.StartsWith ("do")) {
-				file.Insert (lastPos, " {" + file.EolMarker + indent + file.Options.IndentationString + file.EolMarker + indent + "} while ();");
-				caretColumn = indent.Length + 1;
-				caretLine++;
-			} else {
-				file.Insert (lastPos, ";" + file.EolMarker + indent);
-				caretColumn = indent.Length;
-				caretLine++;
-			}
-			file.Caret.Location = new DocumentLocation (caretLine, caretColumn);
 		}
-		
-		
 	}
 }

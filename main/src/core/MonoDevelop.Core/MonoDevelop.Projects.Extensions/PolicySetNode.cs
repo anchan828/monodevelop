@@ -40,6 +40,8 @@ namespace MonoDevelop.Projects.Extensions
 	class PolicySetNode : ExtensionNode
 	{
 		PolicySet polSet;
+
+		#pragma warning disable 649
 		
 		[NodeAttribute ("_name", Required=true)]
 		string name = null;
@@ -49,20 +51,21 @@ namespace MonoDevelop.Projects.Extensions
 		
 		[NodeAttribute ("allowDiffSerialize")]
 		bool allowDiffSerialize;
+
+		#pragma warning restore 649
 		
 		protected override void OnChildNodeAdded (ExtensionNode node)
 		{
 			PolicyResourceNode res = (PolicyResourceNode) node;
 			using (System.IO.StreamReader reader = res.GetStream ())
-				polSet.AddSerializedPolicies (reader);
+				res.AddedKeys = polSet.AddSerializedPolicies (reader);
 			base.OnChildNodeAdded (node);
 		}
 		
 		protected override void OnChildNodeRemoved (ExtensionNode node)
 		{
 			PolicyResourceNode res = (PolicyResourceNode) node;
-			using (System.IO.StreamReader reader = res.GetStream ())
-				polSet.RemoveSerializedPolicies (reader);
+			polSet.RemoveAll (res.AddedKeys);
 			base.OnChildNodeRemoved (node);
 		}
 		
@@ -75,7 +78,7 @@ namespace MonoDevelop.Projects.Extensions
 					foreach (PolicyResourceNode res in ChildNodes) {
 						try {
 						using (System.IO.StreamReader reader = res.GetStream ())
-							polSet.AddSerializedPolicies (reader);
+							res.AddedKeys = polSet.AddSerializedPolicies (reader);
 						} catch (Exception ex) {
 							MonoDevelop.Core.LoggingService.LogError ("Error deserialising policies for {0}@{1}:\n{2}", res.Addin, res.Path, ex);
 						}

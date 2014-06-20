@@ -30,7 +30,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 		private global::Gtk.HBox hbox27;
 		private global::Gtk.Label label50;
 		private global::Gtk.CheckButton autoInsertNewFilesCheckButton;
-		
+
 		protected virtual void Build ()
 		{
 			global::Stetic.Gui.Initialize (this);
@@ -74,7 +74,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 			this.vbox46.Name = "vbox46";
 			this.vbox46.Spacing = 6;
 			// Container child vbox46.Gtk.Box+BoxChild
-			this.table11 = new global::Gtk.Table (((uint)(5)), ((uint)(2)), false);
+			this.table11 = new global::Gtk.Table (((uint)(4)), ((uint)(2)), false);
 			this.table11.Name = "table11";
 			this.table11.RowSpacing = ((uint)(6));
 			this.table11.ColumnSpacing = ((uint)(6));

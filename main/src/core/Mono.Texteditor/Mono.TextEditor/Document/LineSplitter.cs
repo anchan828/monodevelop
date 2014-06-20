@@ -30,6 +30,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Mono.TextEditor.Utils;
 using System.Diagnostics;
+using ICSharpCode.NRefactory;
 
 namespace Mono.TextEditor
 {
@@ -120,32 +121,44 @@ namespace Mono.TextEditor
 			}
 			var iter = startNode;
 			iter = iter.GetNextNode ();
+			int lineNumber = iter.LineNumber;
 			TreeNode line;
 			do {
 				line = iter;
 				iter = iter.GetNextNode ();
-				RemoveLine (line);
+				RemoveLine (line, lineNumber);
 			} while (line != endNode);
 			ChangeLength (startNode, startNode.LengthIncludingDelimiter - charsRemoved + charsLeft, endNode.DelimiterLength);
+		}
+
+		public bool LineEndingMismatch {
+			get;
+			set;
 		}
 
 		//bool inInit;
 		public void Initalize (string text)
 		{
+			LineEndingMismatch = false;
 			Clear ();
 			if (string.IsNullOrEmpty (text))
 				return;
 			var nodes = new List<TreeNode> ();
 
+			var delimiterType = UnicodeNewline.Unknown;
 			int offset = 0;
 			while (true) {
 				var delimiter = NextDelimiter (text, offset);
 				if (delimiter.IsInvalid)
 					break;
-
 				int delimiterEndOffset = delimiter.Offset + delimiter.Length;
 				var newLine = new TreeNode (delimiterEndOffset - offset, delimiter.Length);
 				nodes.Add (newLine);
+				if (offset > 0) {
+					LineEndingMismatch |= delimiterType != delimiter.UnicodeNewline;
+				} else {
+					delimiterType = delimiter.UnicodeNewline;
+				}
 				offset = delimiterEndOffset;
 			}
 			var lastLine = new TreeNode (text.Length - offset, 0);
@@ -217,7 +230,13 @@ namespace Mono.TextEditor
 			public static readonly Delimiter Invalid = new Delimiter (-1, 0);
 
 			public readonly int Offset;
-			public readonly int Length;
+			public readonly UnicodeNewline UnicodeNewline;
+
+			public int Length {
+				get {
+					return UnicodeNewline == UnicodeNewline.CRLF ? 2 : 1;
+				}
+			}
 
 			public int EndOffset {
 				get { return Offset + Length; }
@@ -229,10 +248,10 @@ namespace Mono.TextEditor
 				}
 			}
 
-			public Delimiter (int offset, int length)
+			public Delimiter (int offset, UnicodeNewline unicodeNewline)
 			{
 				Offset = offset;
-				Length = length;
+				UnicodeNewline = unicodeNewline;
 			}
 		}
 
@@ -241,15 +260,26 @@ namespace Mono.TextEditor
 			fixed (char* start = text) {
 				char* p = start + offset;
 				char* endPtr = start + text.Length;
+
 				while (p < endPtr) {
 					switch (*p) {
-					case '\r':
+					case NewLine.CR:
 						char* nextp = p + 1;
-						if (nextp < endPtr && *nextp == '\n') 
-							return new Delimiter ((int)(p - start), 2);
-						return new Delimiter ((int)(p - start), 1);
-					case '\n':
-						return new Delimiter ((int)(p - start), 1);
+						if (nextp < endPtr && *nextp == NewLine.LF)
+							return new Delimiter ((int)(p - start), UnicodeNewline.CRLF);
+						return new Delimiter ((int)(p - start), UnicodeNewline.CR);
+					case NewLine.LF:
+						return new Delimiter ((int)(p - start), UnicodeNewline.LF);
+					case NewLine.NEL:
+						return new Delimiter ((int)(p - start), UnicodeNewline.NEL);
+					case NewLine.VT:
+						return new Delimiter ((int)(p - start), UnicodeNewline.VT);
+					case NewLine.FF:
+						return new Delimiter ((int)(p - start), UnicodeNewline.FF);
+					case NewLine.LS:
+						return new Delimiter ((int)(p - start), UnicodeNewline.LS);
+					case NewLine.PS:
+						return new Delimiter ((int)(p - start), UnicodeNewline.PS);
 					}
 					p++;
 				}
@@ -508,13 +538,13 @@ namespace Mono.TextEditor
 			return result + 1;
 		}
 
-		void RemoveLine (TreeNode line)
+		void RemoveLine (TreeNode line, int lineNumber)
 		{
 			var parent = line.parent;
 			tree.Remove (line);
 			if (parent != null)
 				parent.UpdateAugmentedData ();
-			OnLineRemoved (new LineEventArgs (line));
+			OnLineRemoved (new LineEventArgs (line, lineNumber));
 		}
 
 		TreeNode GetNode (int index)

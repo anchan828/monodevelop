@@ -18,6 +18,7 @@
 		<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.Rebuild" />
 		<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.Clean" />
 		<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.Reload" />
+		<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.Unload" />
 		<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.CustomCommandList" />
 	</Condition>
 	<SeparatorItem id = "BuildSectionEnd" />
@@ -97,6 +98,9 @@
 		</Condition>
 		<Condition id="ItemType" value="IFolderItem">
 			<CommandItem id = "MonoDevelop.Ide.Commands.FileCommands.OpenInTerminal" />
+		</Condition>
+		<Condition id="ItemType" value="Solution|Project|UnknownSolutionItem">
+			<CommandItem id = "MonoDevelop.Ide.Commands.ProjectCommands.EditSolutionItem" />
 		</Condition>
 	</ItemSet>
 	<Condition id="ItemType" value="IFolderItem">

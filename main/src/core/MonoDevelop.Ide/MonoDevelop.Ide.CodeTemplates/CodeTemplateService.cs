@@ -52,7 +52,17 @@ namespace MonoDevelop.Ide.CodeTemplates
 			}
 			set {
 				templates = value ?? new List<CodeTemplate> ();
+				OnTemplatesChanged (EventArgs.Empty);
 			}
+		}
+
+		public static event EventHandler TemplatesChanged;
+
+		static void OnTemplatesChanged (EventArgs e)
+		{
+			var handler = TemplatesChanged;
+			if (handler != null)
+				handler (null, e);
 		}
 		
 		static CodeTemplateService ()
@@ -145,7 +155,7 @@ namespace MonoDevelop.Ide.CodeTemplates
 			}
 			foreach (CodeTemplate template in templates) {
 				if (string.IsNullOrEmpty (template.Shortcut)) {
-					LoggingService.LogError ("CodeTemplateService: Can't save unnamed template " + template);
+					LoggingService.LogUserError ("CodeTemplateService: Can't save unnamed template " + template);
 					continue;
 				}
 				SaveTemplate (template, Path.Combine (TemplatePath, template.Shortcut + ".template.xml"));
@@ -186,7 +196,7 @@ namespace MonoDevelop.Ide.CodeTemplates
 			}
 		}
 		
-		static List<CodeTemplate> LoadTemplates ()
+		static List<CodeTemplate> OldLoadTemplates ()
 		{
 			const string ManifestResourceName = "MonoDevelop-templates.xml";
 			List<CodeTemplate> builtinTemplates = LoadTemplates (XmlTextReader.Create (typeof (CodeTemplateService).Assembly.GetManifestResourceStream (ManifestResourceName)));
@@ -217,6 +227,45 @@ namespace MonoDevelop.Ide.CodeTemplates
 				return result;
 			}
 			
+			LoggingService.LogInfo ("CodeTemplateService: No user templates, reading default templates.");
+			return builtinTemplates;
+		}
+
+		static List<CodeTemplate> LoadTemplates ()
+		{
+			const string ManifestResourceName = "MonoDevelop-templates.xml";
+			const string UnityResourceName = "Unity.template.xml";
+			//load all default templates
+			List<CodeTemplate> builtinTemplates = LoadTemplates (XmlTextReader.Create (typeof (CodeTemplateService).Assembly.GetManifestResourceStream (ManifestResourceName)));
+			//add three extra sets for Unity devs
+			builtinTemplates.AddRange (LoadTemplates(XmlTextReader.Create(typeof(CodeTemplateService).Assembly.GetManifestResourceStream (UnityResourceName))));
+			if (Directory.Exists (TemplatePath)) {
+				List<CodeTemplate> result = new List<CodeTemplate> ();
+				foreach (string templateFile in Directory.GetFiles (TemplatePath, "*.xml")) {
+					result.AddRange (LoadTemplates (XmlTextReader.Create (templateFile)));
+				}
+
+				// merge user templates with built in templates
+				for (int i = 0; i < builtinTemplates.Count; i++) {
+					CodeTemplate curTemplate = builtinTemplates[i];
+					bool found = false;
+					for (int j = 0; j < result.Count; j++) {
+						CodeTemplate curResultTemplate = result[j];
+						if (curTemplate.Shortcut == curResultTemplate.Shortcut) {
+							found = true;
+							if (curResultTemplate.Version != curTemplate.Version)
+								result[j] = curTemplate;
+						}
+					}
+					// template is new, insert it.
+					if (!found) 
+						result.Add (curTemplate);
+				}
+
+
+				return result;
+			}
+
 			LoggingService.LogInfo ("CodeTemplateService: No user templates, reading default templates.");
 			return builtinTemplates;
 		}
