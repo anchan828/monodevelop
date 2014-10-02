@@ -14,15 +14,15 @@
     </Configuration>
   </Configurations>
   <Contents>
-    <File name="Main.cs" subtype="Code" buildaction="Compile" />
+    <File name="Program.cs" subtype="Code" buildaction="Compile" />
     <File name="Resource.xml" resource_id="TestProject.Resource.xml" subtype="Code" buildaction="EmbedAsResource" />
     <File name="Excluded.xml" subtype="Code" buildaction="Exclude" />
     <File name="Copy.xml" subtype="Code" buildaction="FileCopy" />
     <File name="Nothing.xml" subtype="Code" buildaction="Nothing" />
   </Contents>
   <References>
-    <ProjectReference type="Gac" localcopy="True" refto="System, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
-    <ProjectReference type="Gac" localcopy="True" refto="System.Data, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
-    <ProjectReference type="Gac" localcopy="True" refto="System.Xml, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+    <ProjectReference type="Package" localcopy="True" refto="System, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+    <ProjectReference type="Package" localcopy="True" refto="System.Data, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+    <ProjectReference type="Package" localcopy="True" refto="System.Xml, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
   </References>
 </Project>

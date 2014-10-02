@@ -31,14 +31,15 @@ using MonoDevelop.SourceEditor.QuickTasks;
 using ICSharpCode.NRefactory.CSharp;
 using Gtk;
 using MonoDevelop.CodeActions;
+using ICSharpCode.NRefactory.Refactoring;
 
 namespace MonoDevelop.CodeIssues
 {
 	partial class CodeIssueOptionsDialog : Gtk.Dialog
 	{
-		readonly CodeIssueProvider inpector;
+		readonly BaseCodeIssueProvider inpector;
 		
-		public CodeIssueOptionsDialog (CodeIssueProvider inpector)
+		public CodeIssueOptionsDialog (BaseCodeIssueProvider inpector)
 		{
 			this.inpector = inpector;
 			Build ();

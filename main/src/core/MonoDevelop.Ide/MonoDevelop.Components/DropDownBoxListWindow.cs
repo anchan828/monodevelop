@@ -30,6 +30,7 @@ using MonoDevelop.Ide;
 using Gtk;
 using Mono.TextEditor;
 using MonoDevelop.Ide.TypeSystem;
+using System.Text;
 
 namespace MonoDevelop.Components
 {
@@ -41,6 +42,27 @@ namespace MonoDevelop.Components
 		public IListDataProvider DataProvider {
 			get;
 			private set;
+		}
+
+		public int FixedRowHeight {
+			get {
+				return list.FixedRowHeight;
+			}
+			set {
+				list.FixedRowHeight = value;
+				list.CalcRowHeight ();
+			}
+		}
+
+		public int MaxVisibleRows {
+			get {
+				return list.MaxVisibleRows;
+			}
+			set {
+				list.MaxVisibleRows = value;
+				list.CalcVisibleRows ();
+				SetSizeRequest (list.WidthRequest, list.HeightRequest);
+			}
 		}
 		
 		public DropDownBoxListWindow (IListDataProvider provider) : base(Gtk.WindowType.Popup)
@@ -60,6 +82,11 @@ namespace MonoDevelop.Components
 			};
 			SetSizeRequest (list.WidthRequest, list.HeightRequest);
 			vScrollbar = new ScrolledWindow ();
+			vScrollbar.VScrollbar.SizeAllocated += (object o, SizeAllocatedArgs args) => {
+				var minWidth = list.WidthRequest + args.Allocation.Width;
+				if (this.Allocation.Width < minWidth)
+					SetSizeRequest (minWidth, list.HeightRequest);
+			};
 			vScrollbar.Child = list;
 			var vbox = new VBox ();
 			vbox.PackStart (vScrollbar, true, true, 0);
@@ -82,6 +109,9 @@ namespace MonoDevelop.Components
 			base.OnMapped ();
 			Gdk.Pointer.Grab (this.GdkWindow, true, Gdk.EventMask.ButtonPressMask | Gdk.EventMask.ButtonReleaseMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.EnterNotifyMask | Gdk.EventMask.LeaveNotifyMask, null, null, Gtk.Global.CurrentEventTime);
 			Gtk.Grab.Add (this);
+			this.GrabBrokenEvent += delegate {
+				Destroy ();
+			};
 		}
 		
 		protected override void OnUnmapped ()
@@ -90,7 +120,18 @@ namespace MonoDevelop.Components
 			Gdk.Pointer.Ungrab (Gtk.Global.CurrentEventTime);
 			base.OnUnmapped ();
 		}
-		
+
+		void SwitchToSeletedWord ()
+		{
+			string selection = list.WordSelection.ToString ();
+			for (int i = 0; i < DataProvider.IconCount; i++) {
+				if (DataProvider.GetMarkup (i).StartsWith (selection, StringComparison.OrdinalIgnoreCase)) {
+					list.Selection = i;
+					list.WordSelection.Append (selection);
+				}
+			} 
+		}
+
 		public bool ProcessKey (Gdk.Key key, Gdk.ModifierType modifier)
 		{
 			switch (key) {
@@ -134,6 +175,13 @@ namespace MonoDevelop.Components
 			case Gdk.Key.KP_Enter:
 				list.OnSelectItem (EventArgs.Empty);
 				return true;
+			default:
+				char ch = (char)key;
+				if (char.IsLetterOrDigit (ch)) {
+					list.WordSelection.Append (ch);
+					SwitchToSeletedWord ();
+				}
+				break;
 			}
 			
 			return false;
@@ -147,8 +195,24 @@ namespace MonoDevelop.Components
 		
 		protected override bool OnButtonPressEvent (Gdk.EventButton evnt)
 		{
-			Destroy ();
+			if (left)
+				Destroy ();
 			return base.OnButtonPressEvent (evnt);
+		}
+
+
+		bool left = true;
+		protected override bool OnLeaveNotifyEvent (Gdk.EventCrossing evnt)
+		{
+			left = true;
+			return base.OnLeaveNotifyEvent (evnt);
+		}
+
+		protected override bool OnEnterNotifyEvent (Gdk.EventCrossing evnt)
+		{
+			if (evnt.Window == this.GdkWindow)
+				left = false;
+			return base.OnEnterNotifyEvent (evnt);
 		}
 
 		protected override bool OnKeyPressEvent (Gdk.EventKey evnt)
@@ -175,6 +239,11 @@ namespace MonoDevelop.Components
 				}
 			}
 
+			public int FixedRowHeight {
+				get;
+				set;
+			}
+
 		//	bool buttonPressed;
 			bool disableSelection;
 	
@@ -189,13 +258,17 @@ namespace MonoDevelop.Components
 				CalcVisibleRows ();
 			}
 			
-			void CalcRowHeight ()
+			internal void CalcRowHeight ()
 			{
-				layout.SetText ("|");
-				int rowWidth;
-				layout.GetPixelSize (out rowWidth, out rowHeight);
-				rowHeight += padding;
-				SetBounds (Allocation);
+				if (FixedRowHeight > 0) {
+					rowHeight = FixedRowHeight;
+				} else {
+					layout.SetText ("|");
+					int rowWidth;
+					layout.GetPixelSize (out rowWidth, out rowHeight);
+					rowHeight += padding;
+				}
+				SetBounds ();
 			}
 			
 			protected override bool OnLeaveNotifyEvent (Gdk.EventCrossing evnt)
@@ -234,7 +307,14 @@ namespace MonoDevelop.Components
 				}
 				if (SelectionChanged != null) SelectionChanged (this, EventArgs.Empty);
 			}
-			
+			StringBuilder wordSelection = new StringBuilder ();
+
+			public StringBuilder WordSelection {
+				get {
+					return wordSelection;
+				}
+			}
+
 			public int Selection
 			{
 				get {
@@ -242,6 +322,7 @@ namespace MonoDevelop.Components
 				}
 				
 				set {
+					wordSelection.Length = 0;
 					var newValue = Math.Max (0, Math.Min (value, win.DataProvider.IconCount - 1));
 					
 					if (newValue != selection) {
@@ -262,13 +343,14 @@ namespace MonoDevelop.Components
 			void UpdatePage ()
 			{
 				var area = GetRowArea (selection);
-				if (area.Y < vadj.Value) {
-					vadj.Value = area.Y;
-					return;
+				var value = vadj.Value;
+				if (area.Y < value) {
+					value = area.Y;
+				} else if (value + Allocation.Height < area.Bottom) {
+					value = Math.Max (0, area.Bottom - vadj.PageSize + 1);
 				}
-				if (vadj.Value + Allocation.Height < area.Bottom) {
-					vadj.Value = System.Math.Max (0, area.Bottom - vadj.PageSize + 1);
-				}
+				vadj.Value = Math.Max (vadj.Lower, Math.Min (value, vadj.Upper - vadj.PageSize));
+
 			}
 			
 			public bool SelectionDisabled {
@@ -403,22 +485,19 @@ namespace MonoDevelop.Components
 					return Allocation.Height / rowHeight;
 				}
 			}
-			
-			void CalcVisibleRows ()
+
+			internal int MaxVisibleRows = 8;
+			internal void CalcVisibleRows ()
 			{
 				int lvWidth, lvHeight;
 				this.GetSizeRequest (out lvWidth, out lvHeight);
 				if (layout == null)
 					return;
-				
-				int visibleRows = 8;
 				int newHeight;
-	
-				if (this.win.DataProvider.IconCount > visibleRows)
-					newHeight = (rowHeight * visibleRows) + margin * 2;
+				if (this.win.DataProvider.IconCount > MaxVisibleRows)
+					newHeight = (rowHeight * MaxVisibleRows) + margin * 2;
 				else
 					newHeight = (rowHeight * this.win.DataProvider.IconCount) + margin * 2;
-
 				listWidth = Math.Min (450, CalcWidth ());
 				this.SetSizeRequest (listWidth, newHeight);
 			} 
@@ -445,12 +524,18 @@ namespace MonoDevelop.Components
 				return w;
 			}
 
-			void SetBounds (Gdk.Rectangle allocation)
+			void SetBounds ()
 			{
 				if (vadj == null)
 					return;
-				var height = Math.Max (allocation.Height, rowHeight * win.DataProvider.IconCount);
-				vadj.SetBounds (0, height, RowHeight, allocation.Height, allocation.Height);
+				var h = Allocation.Height;
+				var height = Math.Max (h, rowHeight * win.DataProvider.IconCount);
+				if (this.win.DataProvider.IconCount < MaxVisibleRows) {
+					vadj.SetBounds (0, h, 0, 0, h);
+				} else {
+					vadj.SetBounds (0, height, RowHeight, h, h);
+				}
+				UpdatePage ();
 			}
 
 			protected override void OnSizeAllocated (Gdk.Rectangle allocation)
@@ -459,7 +544,7 @@ namespace MonoDevelop.Components
 
 				hadj.SetBounds (0, allocation.Width, 0, 0, allocation.Width);
 
-				SetBounds (allocation);
+				SetBounds ();
 
 				UpdatePage ();
 			}

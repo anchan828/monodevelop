@@ -34,7 +34,7 @@ using Gtk;
 namespace Mono.TextEditor
 {
 	/// <summary>
-	/// The height tree stores the heights of lines and provides a performant y <--> lineNumber conversion.
+	/// The height tree stores the heights of lines and provides a performant conversion between y and lineNumber.
 	/// It takes care of message bubble heights and the height of folded sections.
 	/// </summary>
 	public class HeightTree : IDisposable
@@ -158,6 +158,8 @@ namespace Mono.TextEditor
 		public void Rebuild ()
 		{
 			lock (tree) {
+				if (editor.IsDisposed)
+					return;
 				rebuild = true;
 				try {
 					markers.Clear ();

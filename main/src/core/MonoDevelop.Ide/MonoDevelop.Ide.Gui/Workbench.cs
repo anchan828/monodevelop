@@ -77,19 +77,7 @@ namespace MonoDevelop.Ide.Gui
 				monitor.Step (1);
 				
 				Counters.Initialization.Trace ("Initializing Workspace");
-				try
-				{
-					workbench.InitializeWorkspace();
-				}
-				catch (EntryPointNotFoundException epnfe)
-				{
-					if (Platform.IsWindows)
-					{
-						MessageService.ShowException(epnfe, "An error occurred while initializing MonoDevelop.\nThe most likely cause for this is a conflicting installation of Gtk#.\nPlease uninstall any existing Gtk# installations and, if necessary, install Gtk# 2.12.20 or later.\n(E.g. http://download.xamarin.com/Installer/gtk-sharp-2.12.20.msi )");
-						Environment.Exit(1);
-					}
-					throw;
-				}
+				workbench.InitializeWorkspace();
 				monitor.Step (1);
 				
 				Counters.Initialization.Trace ("Initializing Layout");
@@ -107,10 +95,14 @@ namespace MonoDevelop.Ide.Gui
 				IdeApp.FocusIn += delegate(object o, EventArgs args) {
 					CheckFileStatus ();
 				};
-				
+
+				TypeSystem.TypeSystemService.ProjectContentLoaded += delegate {
+					var doc = ActiveDocument;
+					if (doc != null)
+						doc.ReparseDocument ();
+				};
+
 				pads = null;	// Make sure we get an up to date pad list.
-				AutoReloadDocuments = true;
-				
 				monitor.Step (1);
 			} finally {
 				monitor.EndTask ();
@@ -186,7 +178,6 @@ namespace MonoDevelop.Ide.Gui
 		/// When set to <c>true</c>, opened documents will automatically be reloaded when a change in the underlying
 		/// file is detected (unless the document has unsaved changes)
 		/// </summary>
-		/// </value>
 		public bool AutoReloadDocuments { get; set; }
 		
 		/// <summary>
@@ -416,12 +407,15 @@ namespace MonoDevelop.Ide.Gui
 						if (vcFound != null) {
 							IEditableTextBuffer ipos = (IEditableTextBuffer) vcFound.GetContent (typeof(IEditableTextBuffer));
 							if (line >= 1 && ipos != null) {
-								ipos.SetCaretTo (
-									line,
-									column >= 1 ? column : 1,
-									options.HasFlag (OpenDocumentOptions.HighlightCaretLine),
-									options.HasFlag (OpenDocumentOptions.CenterCaretLine)
-								);
+								doc.DisableAutoScroll ();
+								doc.RunWhenLoaded (() => {
+									ipos.SetCaretTo (
+										line,
+										column >= 1 ? column : 1,
+										options.HasFlag (OpenDocumentOptions.HighlightCaretLine),
+										options.HasFlag (OpenDocumentOptions.CenterCaretLine)
+									);
+								});
 							}
 							
 							if (options.HasFlag (OpenDocumentOptions.BringToFront)) {
@@ -528,7 +522,7 @@ namespace MonoDevelop.Ide.Gui
 			newContent.UntitledName = defaultName;
 			newContent.IsDirty = true;
 			workbench.ShowView (newContent, true);
-			DisplayBindingService.AttachSubWindows (newContent.WorkbenchWindow);
+			DisplayBindingService.AttachSubWindows (newContent.WorkbenchWindow, binding);
 			
 			var document = WrapDocument (newContent.WorkbenchWindow);
 			document.StartReparseThread ();
@@ -620,7 +614,7 @@ namespace MonoDevelop.Ide.Gui
 			if (activeLocationList != null) {
 				NavigationPoint next = activeLocationList.GetNextLocation ();
 				if (next != null)
-					next.Show ();
+					next.ShowDocument ();
 			}
 		}
 		
@@ -631,7 +625,7 @@ namespace MonoDevelop.Ide.Gui
 			if (activeLocationList != null) {
 				NavigationPoint next = activeLocationList.GetPreviousLocation ();
 				if (next != null)
-					next.Show ();
+					next.ShowDocument ();
 			}
 		}
 		
@@ -690,51 +684,40 @@ namespace MonoDevelop.Ide.Gui
 		{
 			IWorkbenchWindow window = (IWorkbenchWindow) sender;
 			if (!args.Forced && window.ViewContent != null && window.ViewContent.IsDirty) {
-				// This path can be reentered if something else tries to close the window
-				// before the user responds to the "Save changes?" dialog.
-				// This results in a stack of "Save changes?" dialogs, and unpredictable behavior 
-				// when responding to all but the first.
-				// The Right Fix would be to make it impossible for this to happen.
-				// For now, we work around by replacing the OnClosing handler 
-				// until we get an answer back from the user.
-				WorkbenchWindowEventHandler dummyClosing = (aSender,someArgs) => { someArgs.Cancel = true; };
-				window.Closing -= OnWindowClosing;
-				window.Closing += dummyClosing;
-
-				try {
-					AlertButton result = MessageService.GenericAlert (Stock.Warning,
-						GettextCatalog.GetString ("Save the changes to document '{0}' before closing?",
-							window.ViewContent.IsUntitled
-								? window.ViewContent.UntitledName
-								: System.IO.Path.GetFileName (window.ViewContent.ContentName)), 
-						GettextCatalog.GetString ("If you don't save, all changes will be permanently lost."),
-						AlertButton.CloseWithoutSave, AlertButton.Cancel, window.ViewContent.IsUntitled ? AlertButton.SaveAs : AlertButton.Save);
-					if (result == AlertButton.Save || result == AlertButton.SaveAs) {
-						if (window.ViewContent.ContentName == null) {
-							FindDocument (window).Save ();
-							args.Cancel = window.ViewContent.IsDirty;
-						} else {
-							try {
-								if (window.ViewContent.IsFile)
-									window.ViewContent.Save (window.ViewContent.ContentName);
-								else
-									window.ViewContent.Save ();
-							}
-							catch (Exception ex) {
-								args.Cancel = true;
-								MessageService.ShowException (ex, GettextCatalog.GetString ("The document could not be saved."));
-							}
-						}
+				AlertButton result = MessageService.GenericAlert (Stock.Warning,
+					GettextCatalog.GetString ("Save the changes to document '{0}' before closing?",
+						window.ViewContent.IsUntitled
+							? window.ViewContent.UntitledName
+							: System.IO.Path.GetFileName (window.ViewContent.ContentName)), 
+				    GettextCatalog.GetString ("If you don't save, all changes will be permanently lost."),
+				    AlertButton.CloseWithoutSave, AlertButton.Cancel, window.ViewContent.IsUntitled ? AlertButton.SaveAs : AlertButton.Save);
+				if (result == AlertButton.Save || result == AlertButton.SaveAs) {
+					if (window.ViewContent.ContentName == null) {
+						FindDocument (window).Save ();
+						args.Cancel = window.ViewContent.IsDirty;
 					} else {
-						args.Cancel = result != AlertButton.CloseWithoutSave;
-						if (!args.Cancel)
-							window.ViewContent.DiscardChanges ();
+						try {
+							if (window.ViewContent.IsFile)
+								window.ViewContent.Save (window.ViewContent.ContentName);
+							else
+								window.ViewContent.Save ();
+							args.Cancel |= window.ViewContent.IsDirty;
+
+						}
+						catch (Exception ex) {
+							args.Cancel = true;
+							MessageService.ShowException (ex, GettextCatalog.GetString ("The document could not be saved."));
+						}
 					}
-				} finally {
-					window.Closing -= dummyClosing;
-					window.Closing += OnWindowClosing;
+					if (args.Cancel)
+						FindDocument (window).Select ();
+				} else {
+					args.Cancel |= result != AlertButton.CloseWithoutSave;
+					if (!args.Cancel)
+						window.ViewContent.DiscardChanges ();
 				}
 			}
+			OnDocumentClosing (FindDocument (window));
 		}
 		
 		void OnWindowClosed (object sender, WorkbenchWindowEventArgs args)
@@ -745,6 +728,7 @@ namespace MonoDevelop.Ide.Gui
 			window.Closed -= OnWindowClosed;
 			documents.Remove (doc); 
 			OnDocumentClosed (doc);
+			doc.DisposeDocument ();
 		}
 		
 		// When looking for the project to which the file belongs, look first
@@ -928,7 +912,7 @@ namespace MonoDevelop.Ide.Gui
 				
 				foreach (DocumentUserPrefs doc in prefs.Files.Distinct (new DocumentUserPrefsFilenameComparer ())) {
 					string fileName = baseDir.Combine (doc.FileName).FullPath;
-					if (GetDocument(fileName) == null && File.Exists (fileName)) {
+					if (File.Exists (fileName)) {
 						var view = IdeApp.Workbench.BatchOpenDocument (pm, fileName, doc.Line, doc.Column);
 						if (fileName == currentFileName)
 							currentView = view;
@@ -990,13 +974,18 @@ namespace MonoDevelop.Ide.Gui
 					return pad;
 			return null;
 		}
-		
+
+		internal void ReorderTab (int oldPlacement, int newPlacement)
+		{
+			workbench.ReorderTab (oldPlacement, newPlacement);
+		}
+
 		internal void ReorderDocuments (int oldPlacement, int newPlacement)
 		{
 			IViewContent content = workbench.InternalViewContentCollection[oldPlacement];
 			workbench.InternalViewContentCollection.RemoveAt (oldPlacement);
 			workbench.InternalViewContentCollection.Insert (newPlacement, content);
-			
+
 			Document doc = documents [oldPlacement];
 			documents.RemoveAt (oldPlacement);
 			documents.Insert (newPlacement, doc);
@@ -1115,8 +1104,21 @@ namespace MonoDevelop.Ide.Gui
 			}
 		}
 
+		void OnDocumentClosing (Document doc)
+		{
+			try {
+				var e = new DocumentEventArgs (doc);
+				EventHandler<DocumentEventArgs> handler = this.DocumentClosing;
+				if (handler != null)
+					handler (this, e);
+			} catch (Exception ex) {
+				LoggingService.LogError ("Exception before closing documents", ex);
+			}
+		}
+
 		public event EventHandler<DocumentEventArgs> DocumentOpened;
 		public event EventHandler<DocumentEventArgs> DocumentClosed;
+		public event EventHandler<DocumentEventArgs> DocumentClosing;
 
 		public void ReparseOpenDocuments ()
 		{
@@ -1217,37 +1219,27 @@ namespace MonoDevelop.Ide.Gui
 				fileInfo.NewContent = newContent;
 				return;
 			}
-			
+
 			Counters.OpenDocumentTimer.Trace ("Showing view");
 			
 			workbench.ShowView (newContent, fileInfo.Options.HasFlag (OpenDocumentOptions.BringToFront));
-			DisplayBindingService.AttachSubWindows (newContent.WorkbenchWindow);
+			DisplayBindingService.AttachSubWindows (newContent.WorkbenchWindow, binding);
 			newContent.WorkbenchWindow.DocumentType = binding.Name;
 			
 			IEditableTextBuffer ipos = (IEditableTextBuffer) newContent.GetContent (typeof(IEditableTextBuffer));
 			if (fileInfo.Line > 0 && ipos != null) {
-				if (newContent.Control.IsRealized) {
-					JumpToLine ();
-				} else {
-					newContent.Control.Realized += HandleNewContentControlRealized;
-				}
+				Mono.TextEditor.Utils.FileSettingsStore.Remove (fileName);
+				ipos.RunWhenLoaded (JumpToLine); 
 			}
+			
 			fileInfo.NewContent = newContent;
 		}
 		
-                void HandleNewContentControlRealized (object sender, EventArgs e)
-                {
-                        JumpToLine ();
-                        newContent.Control.Realized -= HandleNewContentControlRealized;
-                }
-                
-		public bool JumpToLine ()
+		void JumpToLine ()
 		{
 			IEditableTextBuffer ipos = (IEditableTextBuffer) newContent.GetContent (typeof(IEditableTextBuffer));
 			ipos.SetCaretTo (Math.Max(1, fileInfo.Line), Math.Max(1, fileInfo.Column), fileInfo.Options.HasFlag (OpenDocumentOptions.HighlightCaretLine));
-			return false;
 		}
-		
 	}
 	
 	[Flags]

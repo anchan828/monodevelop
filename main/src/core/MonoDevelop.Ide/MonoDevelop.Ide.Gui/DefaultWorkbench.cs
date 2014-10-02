@@ -59,10 +59,8 @@ namespace MonoDevelop.Ide.Gui
 		readonly static string viewContentPath = "/MonoDevelop/Ide/Pads";
 //		readonly static string toolbarsPath    = "/MonoDevelop/Ide/Toolbar";
 		readonly static string stockLayoutsPath    = "/MonoDevelop/Ide/WorkbenchLayouts";
-		readonly static string appName = "MonoDevelop (Unity)";
 		
-		readonly static string configFileBase = "EditingLayout2.xml";
-		static string configFile = UserProfile.Current.ConfigDir.Combine (configFileBase);
+		static string configFile = UserProfile.Current.ConfigDir.Combine ("EditingLayout.xml");
 		const string fullViewModeTag = "[FullViewMode]";
 		const int MAX_LASTACTIVEWINDOWS = 10;
 		const int MinimumWidth = 1000;
@@ -148,18 +146,10 @@ namespace MonoDevelop.Ide.Gui
 		
 		public bool FullScreen {
 			get {
-				return fullscreen;
+				return DesktopService.GetIsFullscreen (this);
 			}
 			set {
-				if (Platform.IsMac)
-					return;
-				fullscreen = value;
-				if (fullscreen) {
-					this.Fullscreen ();
-				} else {
-					this.Unfullscreen ();
-					DesktopService.SetMainWindowDecorations (this);
-				}
+				DesktopService.SetIsFullscreen (this, value);
 			}
 		}
 
@@ -346,6 +336,7 @@ namespace MonoDevelop.Ide.Gui
 				return;
 			
 			rootWidget.Remove (topMenu);
+			topMenu.Destroy ();
 			topMenu = null;
 		}
 		
@@ -691,6 +682,9 @@ namespace MonoDevelop.Ide.Gui
 				if (content.Initialized)
 					content.PadContent.Dispose();
 			}
+
+			rootWidget.Destroy ();
+			Destroy ();
 		}
 		
 		public bool Close() 
@@ -937,20 +931,17 @@ namespace MonoDevelop.Ide.Gui
 			// create DockItems for all the pads
 			foreach (PadCodon content in padContentCollection)
 				AddPad (content, content.DefaultPlacement, content.DefaultStatus);
-				
-			foreach (string basePath in new string[]{PropertyService.DataPath, UserProfile.Current.ConfigDir}) {
-				string configFile = System.IO.Path.Combine (basePath, configFileBase);
-				try {
-					if (System.IO.File.Exists (configFile)) {
-						dock.LoadLayouts (configFile);
-						foreach (string layout in dock.Layouts) {
-							if (!layouts.Contains (layout) && !layout.EndsWith (fullViewModeTag))
-								layouts.Add (layout);
-						}
+			
+			try {
+				if (System.IO.File.Exists (configFile)) {
+					dock.LoadLayouts (configFile);
+					foreach (string layout in dock.Layouts) {
+						if (!layouts.Contains (layout) && !layout.EndsWith (fullViewModeTag))
+							layouts.Add (layout);
 					}
-				} catch (Exception ex) {
-					LoggingService.LogError (ex.ToString ());
 				}
+			} catch (Exception ex) {
+				LoggingService.LogError (ex.ToString ());
 			}
 		}
 		
@@ -1199,7 +1190,14 @@ namespace MonoDevelop.Ide.Gui
 				ignorePageSwitch = false;
 			}
 		}
-		
+
+		internal void ReorderTab (int oldPlacement, int newPlacement)
+		{
+			DockNotebookTab tab = (DockNotebookTab)tabControl.GetTab (oldPlacement);
+			DockNotebookTab targetTab = (DockNotebookTab)tabControl.GetTab (newPlacement);
+			tabControl.ReorderTab (tab, targetTab);
+		}
+
 		#endregion
 
 		#region Dock Item management

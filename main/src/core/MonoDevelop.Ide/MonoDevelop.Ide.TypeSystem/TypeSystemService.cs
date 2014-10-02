@@ -47,6 +47,10 @@ using System.Threading.Tasks;
 using ICSharpCode.NRefactory.Documentation;
 using ICSharpCode.NRefactory.CSharp;
 using MonoDevelop.Ide.Extensions;
+using MonoDevelop.Core.Assemblies;
+using System.Text;
+using ICSharpCode.NRefactory.Semantics;
+using ICSharpCode.NRefactory.Completion;
 
 namespace MonoDevelop.Ide.TypeSystem
 {
@@ -110,9 +114,10 @@ namespace MonoDevelop.Ide.TypeSystem
 
 		public static IType Resolve (this IUnresolvedTypeDefinition def, Project project)
 		{
-			var pf = TypeSystemService.GetProjectContext (project).GetFile (def.Region.FileName);
-			var ctx = pf.GetTypeResolveContext (TypeSystemService.GetCompilation (project), def.Region.Begin);
-			return def.Resolve (ctx);
+			var compilation = TypeSystemService.GetCompilation (project);
+			var ctx = new SimpleTypeResolveContext (compilation.MainAssembly);
+			var resolvedType = def.Resolve (ctx);
+			return resolvedType;
 		}
 		
 		[Obsolete("Do not use this method. Use type references to resolve types. Type references from full reflection names can be got from ReflectionHelper.ParseReflectionName.")]
@@ -165,7 +170,7 @@ namespace MonoDevelop.Ide.TypeSystem
 	
 	public static class TypeSystemService
 	{
-		const string CurrentVersion = "1.1.0";
+		const string CurrentVersion = "1.1.3";
 
 		static List<TypeSystemParserNode> parsers;
 		static string[] filesSkippedInParseThread = new string[0];
@@ -226,10 +231,24 @@ namespace MonoDevelop.Ide.TypeSystem
 							if (projectFile != null)
 								QueueParseJob (wrapper, new [] { projectFile });
 						}
-						if (cachedAssemblyContents.ContainsKey (file.FileName))
-							CheckModifiedFile (cachedAssemblyContents[file.FileName]);
+						AssemblyContext ctx;
+						if (cachedAssemblyContents.TryGetValue (file.FileName, out ctx))
+							CheckModifiedFile (ctx);
 					}
 				}
+
+				foreach (var content in projectContents.Values.ToArray ()) {
+					var files = new List<ProjectFile> ();
+					foreach (var file in e) {
+						var f = content.Project.GetProjectFile (file.FileName);
+						if (f == null || f.BuildAction != BuildAction.Compile)
+							continue;
+						files.Add (f);
+					}
+					if (files.Count > 0)
+						QueueParseJob (content, files);
+				}
+
 			};
 			if (IdeApp.ProjectOperations != null) {
 				IdeApp.ProjectOperations.EndBuild += HandleEndBuild;
@@ -310,7 +329,7 @@ namespace MonoDevelop.Ide.TypeSystem
 		
 		public static IFoldingParser GetFoldingParser (string mimeType)
 		{
-			var node = FoldingParsers.Where (n => n.MimeType == mimeType).FirstOrDefault ();
+			var node = FoldingParsers.FirstOrDefault (n => n.MimeType == mimeType);
 			if (node == null)
 				return null;
 			return node.CreateInstance () as IFoldingParser;
@@ -333,6 +352,8 @@ namespace MonoDevelop.Ide.TypeSystem
 		static object projectWrapperUpdateLock = new object ();
 		public static ParsedDocument ParseFile (Project project, string fileName, string mimeType, TextReader content)
 		{
+			if (fileName == null)
+				throw new ArgumentNullException ("fileName");
 			var parser = GetParser (mimeType);
 			if (parser == null)
 				return null;
@@ -446,7 +467,29 @@ namespace MonoDevelop.Ide.TypeSystem
 		}
 		#region Parser Database Handling
 
-		static string GetCacheDirectory (string filename)
+		static string GetCacheDirectory (TargetFramework framework)
+		{
+			var derivedDataPath = UserProfile.Current.CacheDir.Combine ("DerivedData");
+
+			var name = new StringBuilder ();
+			foreach (var ch in framework.Name) {
+				if (char.IsLetterOrDigit (ch)) {
+					name.Append (ch);
+				} else {
+					name.Append ('_');
+				}
+			}
+
+			string result = derivedDataPath.Combine (name.ToString ());
+			try {
+				if (!Directory.Exists (result))
+					Directory.CreateDirectory (result);
+			} catch (Exception e) {
+				LoggingService.LogError ("Error while creating derived data directories.", e);
+			}
+			return result;
+		}
+		static string InternalGetCacheDirectory (string filename)
 		{
 			string result;
 			var nameNoExtension = Path.GetFileNameWithoutExtension (filename);
@@ -468,10 +511,43 @@ namespace MonoDevelop.Ide.TypeSystem
 						if (CheckCacheDirectoryIsCorrect (filename, subDir, out result))
 							return result;*/
 				}
-			} catch (Exception e) {
-				LoggingService.LogError ("Error while getting derived data directories.", e);
-			}
+				} catch (Exception e) {
+					LoggingService.LogError ("Error while getting derived data directories.", e);
+				}
 			return null;
+		}
+
+		/// <summary>
+		/// Gets the cache directory for a projects derived data cache directory.
+		/// If forceCreation is set to false the method may return null, if the cache doesn't exist.
+		/// </summary>
+		/// <returns>The cache directory.</returns>
+		/// <param name="project">The project to get the cache for.</param>
+		/// <param name="forceCreation">If set to <c>true</c> the creation is forced and the method doesn't return null.</param>
+		public static string GetCacheDirectory (Project project, bool forceCreation = false)
+		{
+			if (project == null)
+				throw new ArgumentNullException ("project");
+			return GetCacheDirectory (project.FileName, forceCreation);
+		}
+
+		/// <summary>
+		/// Gets the cache directory for arbitrary file names.
+		/// If forceCreation is set to false the method may return null, if the cache doesn't exist.
+		/// </summary>
+		/// <returns>The cache directory.</returns>
+		/// <param name="fileName">The file name to get the cache for.</param>
+		/// <param name="forceCreation">If set to <c>true</c> the creation is forced and the method doesn't return null.</param>
+		public static string GetCacheDirectory (string fileName, bool forceCreation = false)
+		{
+			if (fileName == null)
+				throw new ArgumentNullException ("fileName");
+			var result = InternalGetCacheDirectory (fileName);
+			if (result != null)
+				TouchCache (result);
+			if (forceCreation && result == null)
+				result = CreateCacheDirectory (fileName);
+			return result;
 		}
 
 		struct CacheDirectoryInfo
@@ -492,7 +568,7 @@ namespace MonoDevelop.Ide.TypeSystem
 				
 					try {
 						if (!File.Exists (dataPath)) {
-								cacheDirectoryCache [candidate] = CacheDirectoryInfo.Empty;
+							cacheDirectoryCache [candidate] = CacheDirectoryInfo.Empty;
 							result = null;
 							return false;
 						}
@@ -552,19 +628,22 @@ namespace MonoDevelop.Ide.TypeSystem
 				return null;
 			}
 		}
-		
+
+		static FastSerializer sharedSerializer = new FastSerializer ();
+
 		static T DeserializeObject<T> (string path) where T : class
 		{
 			var t = Counters.ParserService.ObjectDeserialized.BeginTiming (path);
 			try {
 				using (var fs = new FileStream (path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan)) {
 					using (var reader = new BinaryReaderWith7BitEncodedInts (fs)) {
-						var s = new FastSerializer ();
-						return (T)s.Deserialize (reader);
+						lock (sharedSerializer) {
+							return (T)sharedSerializer.Deserialize (reader);
+						}
 					}
 				}
 			} catch (Exception e) {
-				LoggingService.LogError ("Error while reading type system cache.", e);
+				LoggingService.LogError ("Error while trying to deserialize " + typeof (T).FullName + ".", e);
 				return default(T);
 			} finally {
 				t.Dispose ();
@@ -580,8 +659,9 @@ namespace MonoDevelop.Ide.TypeSystem
 			try {
 				using (var fs = new FileStream (path, FileMode.Create, FileAccess.Write)) {
 					using (var writer = new BinaryWriterWith7BitEncodedInts (fs)) {
-						FastSerializer s = new FastSerializer ();
-						s.Serialize (writer, obj);
+						lock (sharedSerializer) {
+							sharedSerializer.Serialize (writer, obj);
+						}
 					}
 				}
 			} catch (Exception e) {
@@ -663,8 +743,7 @@ namespace MonoDevelop.Ide.TypeSystem
 		{
 			if (!wrapper.WasChanged)
 				return;
-			string cacheDir = GetCacheDirectory (project.FileName) ?? CreateCacheDirectory (project.FileName);
-			TouchCache (cacheDir);
+			string cacheDir = GetCacheDirectory (project, true);
 			string fileName = Path.GetTempFileName ();
 			
 			SerializeObject (fileName, wrapper.Content.RemoveAssemblyReferences (wrapper.Content.AssemblyReferences));
@@ -727,7 +806,7 @@ namespace MonoDevelop.Ide.TypeSystem
 		static void ReloadAllReferences (IEnumerable<ProjectContentWrapper> contents)
 		{
 			foreach (var wrapper in contents)
-				wrapper.ReloadAssemblyReferences ();
+				wrapper.ReconnectAssemblyReferences ();
 		}
 		
 		[Serializable]
@@ -849,7 +928,7 @@ namespace MonoDevelop.Ide.TypeSystem
 				if (extensionObjects.TryGetValue (typeof (T), out result))
 					return (T)result;
 
-				string cacheDir = GetCacheDirectory (Project.FileName);
+				string cacheDir = GetCacheDirectory (Project);
 				if (cacheDir == null)
 					return default(T);
 
@@ -867,16 +946,32 @@ namespace MonoDevelop.Ide.TypeSystem
 				return default (T);
 			}
 
+			void ClearCachedCompilations ()
+			{
+				// Need to clear this compilation & all compilations that reference this directly or indirectly
+				var stack = new Stack<ProjectContentWrapper> ();
+				stack.Push (this);
+				var cleared = new HashSet<ProjectContentWrapper> ();
+				while (stack.Count > 0) {
+					var cur = stack.Pop ();
+					if (cleared.Contains (cur))
+						continue;
+					cleared.Add (cur);
+					cur.compilation = null;
+					foreach (var project in cur.ReferencedProjects)
+						stack.Push (GetProjectContentWrapper (project));
+				}
+			}
+
 			public void UpdateContent (Func<IProjectContent, IProjectContent> updateFunc)
 			{
 				lock (this) {
-					if (Content is LazyProjectLoader) {
-						((LazyProjectLoader)Content).ContextTask.Wait ();
+					var lazyProjectLoader = Content as LazyProjectLoader;
+					if (lazyProjectLoader != null) {
+						lazyProjectLoader.ContextTask.Wait ();
 					}
 					Content = updateFunc (Content);
-					// Need to clear this compilation & all compilations that reference this directly or indirectly
-					foreach (var wrapper in projectContents.Values)
-						wrapper.compilation = null;
+					ClearCachedCompilations ();
 					WasChanged = true;
 				}
 			}
@@ -920,6 +1015,25 @@ namespace MonoDevelop.Ide.TypeSystem
 				private set;
 			}
 
+			bool inLoad;
+			public bool InLoad {
+				get {
+					return inLoad;
+				}
+				set {
+					inLoad = value;
+					OnInLoadChanged (EventArgs.Empty);
+				}
+			}
+
+			public event EventHandler InLoadChanged;
+
+			protected virtual void OnInLoadChanged (EventArgs e)
+			{
+				var handler = InLoadChanged;
+				if (handler != null)
+					handler (this, e);
+			}
 
 			[NonSerialized]
 			internal LazyAssemblyLoader OutputAssembly = null;
@@ -980,6 +1094,7 @@ namespace MonoDevelop.Ide.TypeSystem
 						}
 
 						context = new MonoDevelopProjectContent (this.wrapper.Project);
+						wrapper.InLoad = true;
 						context = context.SetLocation (this.wrapper.Project.FileName);
 						context = context.SetAssemblyName (this.wrapper.Project.Name);
 						QueueParseJob (this.wrapper);
@@ -989,12 +1104,10 @@ namespace MonoDevelop.Ide.TypeSystem
 
 				static IProjectContent LoadProjectCache (Project project)
 				{
-					string cacheDir = GetCacheDirectory (project.FileName);
-					if (cacheDir == null) {
+					string cacheDir = GetCacheDirectory (project);
+					if (cacheDir == null)
 						return null;
-					}
 					
-					TouchCache (cacheDir);
 					var cache = DeserializeObject<IProjectContent> (Path.Combine (cacheDir, "completion.cache"));
 					if (cache is MonoDevelopProjectContent)
 						((MonoDevelopProjectContent)cache).Project = project;
@@ -1159,28 +1272,32 @@ namespace MonoDevelop.Ide.TypeSystem
 				}
 			}
 
-			bool HasCyclicRefs (ProjectContentWrapper wrapper)
+			bool HasCyclicRefs (ProjectContentWrapper wrapper, HashSet<Project> nonCyclicCache)
 			{
+				if (nonCyclicCache.Contains (wrapper.Project))
+					return false;
+				nonCyclicCache.Add (wrapper.Project);
 				foreach (var referencedProject in wrapper.ReferencedProjects) {
 					ProjectContentWrapper w;
-					if (referencedProject == Project || projectContents.TryGetValue (referencedProject, out w) && HasCyclicRefs (w)) {
+					if (referencedProject == Project || referencedProject == wrapper.Project || projectContents.TryGetValue (referencedProject, out w) && HasCyclicRefs (w, nonCyclicCache)) {
 						return true;
 					}
 				}
 				return false;
 			}
 
-			public void ReloadAssemblyReferences ()
+			public void ReconnectAssemblyReferences ()
 			{
 				var netProject = this.Project as DotNetProject;
 				if (netProject == null)
 					return;
 				try {
 					var contexts = new List<IAssemblyReference> ();
+					var nonCyclicCache =new HashSet<Project> ();
 					foreach (var referencedProject in ReferencedProjects) {
 						ProjectContentWrapper wrapper;
 						if (projectContents.TryGetValue (referencedProject, out wrapper)) {
-							if (HasCyclicRefs (wrapper))
+							if (HasCyclicRefs (wrapper, nonCyclicCache))
 								continue;
 							contexts.Add (new UnresolvedAssemblyDecorator (wrapper));
 						}
@@ -1222,11 +1339,11 @@ namespace MonoDevelop.Ide.TypeSystem
 					WasChanged = changed;
 				} catch (Exception e) {
 					if (netProject.TargetRuntime == null) {
-						LoggingService.LogError ("Target runtime was null:" + Project);
+						LoggingService.LogError ("Target runtime was null: " + Project.Name);
 					} else if (netProject.TargetRuntime.AssemblyContext == null) {
-						LoggingService.LogError ("Target runtime assambly context was null:" + Project);
+						LoggingService.LogError ("Target runtime assembly context was null: " + Project.Name);
 					}
-					LoggingService.LogError ("Error while reloading all references of project:" + Project, e);
+					LoggingService.LogError ("Error while reloading all references of project: " + Project.Name, e);
 				}
 			}
 		}
@@ -1256,6 +1373,11 @@ namespace MonoDevelop.Ide.TypeSystem
 					Task.Factory.StartNew (delegate {
 						CheckModifiedFiles (project, files, wrapper);
 					});
+
+					if (dotNetProject != null) {
+						StartFrameworkLookup (dotNetProject);
+					}
+
 					OnProjectContentLoaded (new ProjectContentEventArgs (project, wrapper.Content));
 					return wrapper;
 				} catch (Exception ex) {
@@ -1355,7 +1477,9 @@ namespace MonoDevelop.Ide.TypeSystem
 				ws.ItemRemoved -= OnWorkspaceItemRemoved;
 			} else if (item is Solution) {
 				Solution solution = (Solution)item;
-				Parallel.ForEach (solution.GetAllProjects (), project => UnloadProject (project));
+				foreach (var project in solution.GetAllProjects ()) {
+					UnloadProject (project);
+				}
 				solution.SolutionItemAdded -= OnSolutionItemAdded;
 				solution.SolutionItemRemoved -= OnSolutionItemRemoved;
 			}
@@ -1404,7 +1528,7 @@ namespace MonoDevelop.Ide.TypeSystem
 			if (args.SolutionItem is Project) {
 				var wrapper = LoadProject ((Project)args.SolutionItem);
 				if (wrapper != null)
-					wrapper.ReloadAssemblyReferences ();
+					wrapper.ReconnectAssemblyReferences ();
 			}
 		}
 		
@@ -1453,7 +1577,7 @@ namespace MonoDevelop.Ide.TypeSystem
 		}
 		#endregion
 		
-		
+		/*
 		class SimpleAssemblyResolver : IAssemblyResolver
 		{
 			string lookupPath;
@@ -1536,20 +1660,16 @@ namespace MonoDevelop.Ide.TypeSystem
 			ReaderParameters parameters = new ReaderParameters ();
 			parameters.AssemblyResolver = new DefaultAssemblyResolver (); // new SimpleAssemblyResolver (Path.GetDirectoryName (fileName));
 			return AssemblyDefinition.ReadAssembly (fileName, parameters);
-		}
+		}*/
 		
 		static bool GetXml (string baseName, MonoDevelop.Core.Assemblies.TargetRuntime runtime, out FilePath xmlFileName)
 		{
-			string filePattern = Path.GetFileNameWithoutExtension (baseName) + ".*";
 			try {
-				foreach (string fileName in Directory.EnumerateFileSystemEntries (Path.GetDirectoryName (baseName), filePattern)) {
-					if (fileName.ToLower ().EndsWith (".xml")) {
-						xmlFileName = LookupLocalizedXmlDoc (fileName);
-						return true;
-					}
-				}
+				xmlFileName = LookupLocalizedXmlDoc (baseName);
+				if (xmlFileName != null)
+					return true;
 			} catch (Exception e) {
-				LoggingService.LogError ("Error while retrieving file system entries.", e);
+				LoggingService.LogError ("Error while looking up XML docs.", e);
 			}
 			
 			if (MonoDevelop.Core.Platform.IsWindows) {
@@ -1871,16 +1991,13 @@ namespace MonoDevelop.Ide.TypeSystem
 					}
 				} catch (Exception) {
 				}
-				var asm = ReadAssembly (fileName);
-				if (asm == null)
-					return null;
-				
+
 				IUnresolvedAssembly assembly;
 				try {
-					var loader = new CecilLoader ();
+					var loader = new IkvmLoader ();
 					loader.IncludeInternalMembers = true;
 					loader.DocumentationProvider = new CombinedDocumentationProvider (fileName);
-					assembly = loader.LoadAssembly (asm);
+					assembly = loader.LoadAssemblyFile (fileName);
 				} catch (Exception e) {
 					LoggingService.LogError ("Can't convert assembly: " + fileName, e);
 					return null;
@@ -1946,15 +2063,14 @@ namespace MonoDevelop.Ide.TypeSystem
 					CheckModifiedFile (loadedContext);
 					return loadedContext;
 				}
-				var newcachedAssemblyContents = new Dictionary<string, AssemblyContext> (cachedAssemblyContents);
 
 				string cache = GetCacheDirectory (fileName);
 				if (cache != null) {
-					TouchCache (cache);
 					var deserialized = DeserializeObject <AssemblyContext> (Path.Combine (cache, "assembly.descriptor"));
 					if (deserialized != null) {
 						deserialized.CtxLoader = new LazyAssemblyLoader (fileName, cache);
 						CheckModifiedFile (deserialized);
+						var newcachedAssemblyContents = new Dictionary<string, AssemblyContext> (cachedAssemblyContents);
 						newcachedAssemblyContents [fileName] = deserialized;
 						cachedAssemblyContents = newcachedAssemblyContents;
 						OnAssemblyLoaded (new AssemblyLoadedEventArgs (deserialized.CtxLoader));
@@ -1973,6 +2089,7 @@ namespace MonoDevelop.Ide.TypeSystem
 					SerializeObject (Path.Combine (cache, "assembly.descriptor"), result);
 					
 					result.CtxLoader = new LazyAssemblyLoader (fileName, cache);
+					var newcachedAssemblyContents = new Dictionary<string, AssemblyContext> (cachedAssemblyContents);
 					newcachedAssemblyContents [fileName] = result;
 					cachedAssemblyContents = newcachedAssemblyContents;
 					OnAssemblyLoaded (new AssemblyLoadedEventArgs (result.CtxLoader));
@@ -2019,7 +2136,141 @@ namespace MonoDevelop.Ide.TypeSystem
 			var content = GetProjectContentWrapper (project);
 			return content.Compilation;
 		}
-		
+
+		public static ICompilation GetCompilation (SystemAssembly assembly, ICompilation compilation)
+		{
+			var ctx = LoadAssemblyContext (assembly.Location);
+			var list = compilation.ReferencedAssemblies.Select (r => r.UnresolvedAssembly).ToList ();
+			list.Add (compilation.MainAssembly.UnresolvedAssembly);
+			var	result = new SimpleCompilation (ctx, list);
+			return result;
+		}
+
+		static IEnumerable<SystemAssembly> GetFrameworkAssemblies (DotNetProject netProject)
+		{
+			var assemblies = new Dictionary<string, SystemAssembly> ();
+			foreach (var systemPackage in netProject.AssemblyContext.GetPackages ()) {
+				foreach (var assembly in systemPackage.Assemblies) {
+					SystemAssembly existing;
+					if (assemblies.TryGetValue (assembly.Name, out existing)) {
+						Version v1, v2;
+						if (!Version.TryParse (existing.Version, out v1))
+							continue;
+						if (!Version.TryParse (assembly.Version, out v2))
+							continue;
+						if (v1 > v2)
+							continue;
+					}
+					assemblies [assembly.Name] = assembly;
+				}
+			}
+			return assemblies.Values;
+		}
+
+		class FrameworkTask
+		{
+			public int RetryCount { get; set; }
+			public Task<FrameworkLookup> Task { get; set; }
+
+		}
+
+		readonly static Dictionary<string, FrameworkTask> frameworkLookup = new Dictionary<string, FrameworkTask> ();
+
+		static void StartFrameworkLookup (DotNetProject netProject)
+		{
+			if (netProject == null)
+				throw new ArgumentNullException ("netProject");
+			lock (frameworkLookup) {
+				FrameworkTask result;
+				if (netProject.TargetFramework == null)
+					return;
+				var frameworkName = netProject.TargetFramework.Name;
+				if (!frameworkLookup.TryGetValue (frameworkName, out result))
+					frameworkLookup [frameworkName] = result = new FrameworkTask ();
+				if (result.Task != null)
+					return;
+				result.Task = Task.Factory.StartNew (delegate {
+					return GetFrameworkLookup (netProject);
+				});
+			}
+		}
+
+		public static bool TryGetFrameworkLookup (DotNetProject project, out FrameworkLookup lookup)
+		{
+			lock (frameworkLookup) {
+				FrameworkTask result;
+				if (frameworkLookup.TryGetValue (project.TargetFramework.Name, out result)) {
+					if (!result.Task.IsCompleted)  {
+						lookup = null;
+						return false;
+					}
+					lookup = result.Task.Result;
+					return true;
+				}
+			}
+			lookup = null;
+			return false;
+		}
+
+		public static bool RecreateFrameworkLookup (DotNetProject netProject)
+		{
+			lock (frameworkLookup) {
+				FrameworkTask result;
+				if (!frameworkLookup.TryGetValue (netProject.TargetFramework.Name, out result))
+					return false;
+				if (result.RetryCount > 5) {
+					LoggingService.LogError ("Can't create framework lookup for:" + netProject.TargetFramework.Name);
+					return false;
+				}
+				result.RetryCount++;
+				LoggingService.LogInfo ("Trying to recreate framework lookup for {0}, try {1}.", netProject.TargetFramework.Name, result.RetryCount);
+				StartFrameworkLookup (netProject);
+				return true;
+			}
+		}
+
+		static FrameworkLookup GetFrameworkLookup (DotNetProject netProject)
+		{
+			FrameworkLookup result;
+			string fileName;
+			var cache = GetCacheDirectory (netProject.TargetFramework);
+			fileName = Path.Combine (cache, "FrameworkLookup_" + FrameworkLookup.CurrentVersion + ".dat");
+			try {
+				if (File.Exists (fileName)) {
+					result = FrameworkLookup.Load (fileName);
+					if (result != null) {
+						return result;
+					}
+				}
+			} catch (Exception e) {
+				LoggingService.LogWarning ("Can't read framework cache - recreating...", e);
+			}
+
+			try {
+				using (var creator = FrameworkLookup.Create (fileName)) {
+					foreach (var assembly in GetFrameworkAssemblies (netProject)) {
+						var ctx = LoadAssemblyContext (assembly.Location);
+						foreach (var type in ctx.Ctx.GetAllTypeDefinitions ()) {
+							if (!type.IsPublic)
+								continue;
+							creator.AddLookup (assembly.Package.Name, assembly.FullName, type);
+						}
+					}
+				}
+			} catch (Exception e){
+				LoggingService.LogError ("Error while storing framework lookup", e);
+				return FrameworkLookup.Empty;
+			}
+
+			try {
+				result = FrameworkLookup.Load (fileName);
+				return result;
+			} catch (Exception e) {
+				LoggingService.LogError ("Error loading framework lookup", e);
+				return FrameworkLookup.Empty;
+			}
+		}
+
 		public static ProjectContentWrapper GetProjectContentWrapper (Project project)
 		{
 			if (project == null)
@@ -2094,25 +2345,29 @@ namespace MonoDevelop.Ide.TypeSystem
 				TypeSystemParserNode node = null;
 				TypeSystemParser parser = null;
 				var tags = Context.GetExtensionObject <ProjectCommentTags> ();
-
-				foreach (var file in (FileList ?? Context.Project.Files)) {
-					var fileName = file.FilePath;
-					if (filesSkippedInParseThread.Any (f => f == fileName))
-						continue;
-					if (node == null || !node.CanParse (fileName, file.BuildAction)) {
-						node = TypeSystemService.GetTypeSystemParserNode (DesktopService.GetMimeTypeForUri (fileName), file.BuildAction);
-						parser = node != null ? node.Parser : null;
+				Context.InLoad = true;
+				try {
+					foreach (var file in (FileList ?? Context.Project.Files)) {
+						var fileName = file.FilePath;
+						if (filesSkippedInParseThread.Any (f => f == fileName))
+							continue;
+						if (node == null || !node.CanParse (fileName, file.BuildAction)) {
+							node = TypeSystemService.GetTypeSystemParserNode (DesktopService.GetMimeTypeForUri (fileName), file.BuildAction);
+							parser = node != null ? node.Parser : null;
+						}
+						if (parser == null)
+							continue;
+						var parsedDocument = parser.Parse (false, fileName, Context.Project);
+						if (tags != null)
+							tags.UpdateTags (Context.Project, parsedDocument.FileName, parsedDocument.TagComments);
+						var oldFile = Context.Content.GetFile (fileName);
+						Context.UpdateContent (c => c.AddOrUpdateFiles (parsedDocument.ParsedFile));
+						if (oldFile != null)
+							Context.InformFileRemoved (new ParsedFileEventArgs (oldFile));
+						Context.InformFileAdded (new ParsedFileEventArgs (parsedDocument.ParsedFile));
 					}
-					if (parser == null)
-						continue;
-					var parsedDocument = parser.Parse (false, fileName, Context.Project);
-					if (tags != null)
-						tags.UpdateTags (Context.Project, parsedDocument.FileName, parsedDocument.TagComments);
-					var oldFile = Context.Content.GetFile (fileName);
-					Context.UpdateContent (c => c.AddOrUpdateFiles (parsedDocument.ParsedFile));
-					if (oldFile != null)
-						Context.InformFileRemoved (new ParsedFileEventArgs (oldFile));
-					Context.InformFileAdded (new ParsedFileEventArgs (parsedDocument.ParsedFile));
+				} finally {
+					Context.InLoad = false;
 				}
 			}
 		}
@@ -2217,6 +2472,7 @@ namespace MonoDevelop.Ide.TypeSystem
 				foreach (var pj in parseQueue) {
 					if (pj.Context == context) {
 						parseQueueIndex.Remove (pj.Context);
+						pj.Context.InLoad = false;
 					}
 				}
 			}
@@ -2389,6 +2645,7 @@ namespace MonoDevelop.Ide.TypeSystem
 			}
 		}
 		#endregion
+
 	}
 
 	internal sealed class AssemblyLoadedEventArgs : EventArgs

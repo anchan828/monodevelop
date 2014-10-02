@@ -53,39 +53,42 @@ namespace MonoDevelop.VersionControl
 		
 		static VersionControlService ()
 		{
-			try {
-				overlay_modified = Gdk.Pixbuf.LoadFromResource("overlay_modified.png");
-				overlay_removed = Gdk.Pixbuf.LoadFromResource("overlay_removed.png");
-				overlay_conflicted = Gdk.Pixbuf.LoadFromResource("overlay_conflicted.png");
-				overlay_added = Gdk.Pixbuf.LoadFromResource("overlay_added.png");
-				overlay_controled = Gdk.Pixbuf.LoadFromResource("overlay_controled.png");
-				overlay_unversioned = Gdk.Pixbuf.LoadFromResource("overlay_unversioned.png");
-				overlay_protected = Gdk.Pixbuf.LoadFromResource("overlay_lock_required.png");
-				overlay_unlocked = Gdk.Pixbuf.LoadFromResource("overlay_unlocked.png");
-				overlay_locked = Gdk.Pixbuf.LoadFromResource("overlay_locked.png");
-	//			overlay_normal = Gdk.Pixbuf.LoadFromResource("overlay_normal.png");
-			
-				icon_modified = ImageService.GetPixbuf ("gtk-edit", Gtk.IconSize.Menu);
-				icon_removed = ImageService.GetPixbuf (Gtk.Stock.Remove, Gtk.IconSize.Menu);
-				icon_conflicted = ImageService.GetPixbuf (Gtk.Stock.DialogWarning, Gtk.IconSize.Menu);
-				icon_added = ImageService.GetPixbuf (Gtk.Stock.Add, Gtk.IconSize.Menu);
-				icon_controled = Gdk.Pixbuf.LoadFromResource("overlay_controled.png");
-			} catch (Exception e) {
-				LoggingService.LogError ("Error while loading icons.", e);
-			}
-			IdeApp.Workspace.FileAddedToProject += OnFileAdded;
-			//IdeApp.Workspace.FileChangedInProject += OnFileChanged;
-			//IdeApp.Workspace.FileRemovedFromProject += OnFileRemoved;
-			//IdeApp.Workspace.FileRenamedInProject += OnFileRenamed;
-			
-			IdeApp.Workspace.ItemAddedToSolution += OnEntryAdded;
-			IdeApp.Exiting += delegate {
-				DelayedSaveComments (null);
+			IdeApp.Initialized += delegate {
+				try {
+					overlay_modified = Gdk.Pixbuf.LoadFromResource ("overlay_modified.png");
+					overlay_removed = Gdk.Pixbuf.LoadFromResource ("overlay_removed.png");
+					overlay_conflicted = Gdk.Pixbuf.LoadFromResource ("overlay_conflicted.png");
+					overlay_added = Gdk.Pixbuf.LoadFromResource ("overlay_added.png");
+					overlay_controled = Gdk.Pixbuf.LoadFromResource ("overlay_controled.png");
+					overlay_unversioned = Gdk.Pixbuf.LoadFromResource ("overlay_unversioned.png");
+					overlay_protected = Gdk.Pixbuf.LoadFromResource ("overlay_lock_required.png");
+					overlay_unlocked = Gdk.Pixbuf.LoadFromResource ("overlay_unlocked.png");
+					overlay_locked = Gdk.Pixbuf.LoadFromResource ("overlay_locked.png");
+		//			overlay_normal = Gdk.Pixbuf.LoadFromResource("overlay_normal.png");
+
+					icon_modified = ImageService.GetPixbuf ("gtk-edit", Gtk.IconSize.Menu);
+					icon_removed = ImageService.GetPixbuf (Gtk.Stock.Remove, Gtk.IconSize.Menu);
+					icon_conflicted = ImageService.GetPixbuf (Gtk.Stock.DialogWarning, Gtk.IconSize.Menu);
+					icon_added = ImageService.GetPixbuf (Gtk.Stock.Add, Gtk.IconSize.Menu);
+					icon_controled = Gdk.Pixbuf.LoadFromResource ("overlay_controled.png");
+				} catch (Exception e) {
+					LoggingService.LogError ("Error while loading icons.", e);
+				}
+
+				IdeApp.Workspace.FileAddedToProject += OnFileAdded;
+				//IdeApp.Workspace.FileChangedInProject += OnFileChanged;
+				//IdeApp.Workspace.FileRemovedFromProject += OnFileRemoved;
+				//IdeApp.Workspace.FileRenamedInProject += OnFileRenamed;
+
+				IdeApp.Workspace.ItemAddedToSolution += OnEntryAdded;
+				IdeApp.Exiting += delegate {
+					DelayedSaveComments (null);
+				};
 			};
-			
+
 			AddinManager.AddExtensionNodeHandler ("/MonoDevelop/VersionControl/VersionControlSystems", OnExtensionChanged);
 		}
-		
+
 		static void OnExtensionChanged (object s, ExtensionNodeEventArgs args)
 		{
 			VersionControlSystem vcs = (VersionControlSystem) args.ExtensionObject;
@@ -175,7 +178,8 @@ namespace MonoDevelop.VersionControl
 			}
 			return String.Empty;
 		}
-		
+
+		internal static Dictionary<Repository, InternalRepositoryReference> referenceCache = new Dictionary<Repository, InternalRepositoryReference> ();
 		public static Repository GetRepository (IWorkspaceObject entry)
 		{
 			InternalRepositoryReference repoRef = (InternalRepositoryReference) entry.ExtendedProperties [typeof(InternalRepositoryReference)];
@@ -186,14 +190,17 @@ namespace MonoDevelop.VersionControl
 			InternalRepositoryReference rref = null;
 			if (repo != null) {
 				repo.AddRef ();
-				rref = new InternalRepositoryReference (repo);
+				if (!referenceCache.TryGetValue (repo, out rref)) {
+					rref = new InternalRepositoryReference (repo);
+					referenceCache [repo] = rref;
+				}
 			}
 			entry.ExtendedProperties [typeof(InternalRepositoryReference)] = rref;
 			
 			return repo;
 		}
 		
-		static Repository GetRepositoryReference (string path, string id)
+		public static Repository GetRepositoryReference (string path, string id)
 		{
 			foreach (VersionControlSystem vcs in GetVersionControlSystems ()) {
 				Repository repo = vcs.GetRepositoryReference (path, id);
@@ -209,7 +216,7 @@ namespace MonoDevelop.VersionControl
 		{
 			lock (commentsLock) {
 				Hashtable doc = GetCommitComments ();
-				if (comment == null || comment.Length == 0) {
+				if (String.IsNullOrEmpty (comment)) {
 					if (doc.ContainsKey (file)) {
 						doc.Remove (file);
 						if (save) SaveComments ();
@@ -483,7 +490,7 @@ namespace MonoDevelop.VersionControl
 		
 		static void SolutionItemAddFile (string rootPath, HashSet<string> files, string file)
 		{
-			if (!file.StartsWith (rootPath + Path.DirectorySeparatorChar))
+			if (!file.StartsWith (rootPath + Path.DirectorySeparatorChar, StringComparison.Ordinal))
 			    return;
 			if (!File.Exists (file))
 				return;
@@ -736,12 +743,13 @@ namespace MonoDevelop.VersionControl
 
 		public Repository Repo {
 			get {
-				return this.repo;
+				return repo;
 			}
 		}
 		
 		public void Dispose ()
 		{
+			VersionControlService.referenceCache.Remove (repo);
 			repo.Unref ();
 		}
 	}

@@ -141,19 +141,25 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		
 		public void Save (string fileName)
 		{
+			string content = SaveToString ();
+			TextFile.WriteFile (fileName, content, bom, true);
+		}
+		
+		public string SaveToString ()
+		{
 			// StringWriter.Encoding always returns UTF16. We need it to return UTF8, so the
 			// XmlDocument will write the UTF8 header.
 			ProjectWriter sw = new ProjectWriter (bom);
 			sw.NewLine = newLine;
 			doc.Save (sw);
-			
+
 			string content = sw.ToString ();
 			if (endsWithEmptyLine && !content.EndsWith (newLine))
 				content += newLine;
-			
-			TextFile.WriteFile (fileName, content, bom, true);
+
+			return content;
 		}
-		
+
 		public string DefaultTargets {
 			get { return doc.DocumentElement.GetAttribute ("DefaultTargets"); }
 			set { doc.DocumentElement.SetAttribute ("DefaultTargets", value); }
@@ -428,14 +434,30 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		public string Name {
 			get { return Element.Name; }
 		}
-		
+
+		[Obsolete]
 		public string Value {
 			get {
-				return Element.InnerXml; 
+				return Element.InnerText; 
 			}
 			set {
-				Element.InnerXml = value;
+				Element.InnerText = value;
 			}
+		}
+
+		public string GetValue (bool isXml = false)
+		{
+			if (isXml)
+				return Element.InnerXml;
+			return Element.InnerText;
+		}
+
+		public void SetValue (string value, bool isXml = false)
+		{
+			if (isXml)
+				Element.InnerXml = value;
+			else
+				Element.InnerText = value;
 		}
 	}
 	
@@ -443,8 +465,8 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 	{
 		MSBuildProperty GetProperty (string name);
 		IEnumerable<MSBuildProperty> Properties { get; }
-		void SetPropertyValue (string name, string value);
-		string GetPropertyValue (string name);
+		MSBuildProperty SetPropertyValue (string name, string value, bool preserveExistingCase, bool isXml = false);
+		string GetPropertyValue (string name, bool isXml = false);
 		bool RemoveProperty (string name);
 		void RemoveAllProperties ();
 		void UnMerge (MSBuildPropertySet baseGrp, ISet<string> propertiesToExclude);
@@ -476,19 +498,22 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			return null;
 		}
 
-		public void SetPropertyValue (string name, string value)
+		public MSBuildProperty SetPropertyValue (string name, string value, bool preserveExistingCase, bool isXml = false)
 		{
 			MSBuildProperty p = GetProperty (name);
-			if (p != null)
-				p.Value = value;
-			else
-				groups [0].SetPropertyValue (name, value);
+			if (p != null) {
+				if (!preserveExistingCase || !string.Equals (value, p.GetValue (isXml), StringComparison.OrdinalIgnoreCase)) {
+					p.SetValue (value, isXml);
+				}
+				return p;
+			}
+			return groups [0].SetPropertyValue (name, value, preserveExistingCase, isXml);
 		}
 
-		public string GetPropertyValue (string name)
+		public string GetPropertyValue (string name, bool isXml = false)
 		{
 			MSBuildProperty prop = GetProperty (name);
-			return prop != null ? prop.Value : null;
+			return prop != null ? prop.GetValue (isXml) : null;
 		}
 
 		public bool RemoveProperty (string name)
@@ -585,24 +610,27 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			}
 		}
 		
-		public void SetPropertyValue (string name, string value)
+		public MSBuildProperty SetPropertyValue (string name, string value, bool preserveExistingCase, bool isXml = false)
 		{
 			MSBuildProperty prop = GetProperty (name);
 			if (prop == null) {
 				XmlElement pelem = AddChildElement (name);
 				prop = new MSBuildProperty (pelem);
 				properties [name] = prop;
+				prop.SetValue (value, isXml);
+			} else if (!preserveExistingCase || !string.Equals (value, prop.GetValue (isXml), StringComparison.OrdinalIgnoreCase)) {
+				prop.SetValue (value, isXml);
 			}
-			prop.Value = value;
+			return prop;
 		}
 		
-		public string GetPropertyValue (string name)
+		public string GetPropertyValue (string name, bool isXml = false)
 		{
 			MSBuildProperty prop = GetProperty (name);
 			if (prop == null)
 				return null;
 			else
-				return prop.Value;
+				return prop.GetValue (isXml);
 		}
 		
 		public bool RemoveProperty (string name)
@@ -634,7 +662,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 				if (propsToExclude != null && propsToExclude.Contains (prop.Name))
 					continue;
 				MSBuildProperty thisProp = GetProperty (prop.Name);
-				if (thisProp != null && prop.Value.Equals (thisProp.Value, StringComparison.CurrentCultureIgnoreCase))
+				if (thisProp != null && prop.GetValue (true).Equals (thisProp.GetValue (true), StringComparison.OrdinalIgnoreCase))
 					RemoveProperty (prop.Name);
 			}
 		}
@@ -643,7 +671,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		{
 			string s = "[MSBuildPropertyGroup:";
 			foreach (MSBuildProperty prop in Properties)
-				s += " " + prop.Name + "=" + prop.Value;
+				s += " " + prop.Name + "=" + prop.GetValue (true);
 			return s + "]";
 		}
 
@@ -669,21 +697,19 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			return Element [name, MSBuildProject.Schema] != null;
 		}
 		
-		public void SetMetadata (string name, string value)
-		{
-			SetMetadata (name, value, true);
-		}
-		
-		public void SetMetadata (string name, string value, bool isLiteral)
+		public void SetMetadata (string name, string value, bool isXml = false)
 		{
 			XmlElement elem = Element [name, MSBuildProject.Schema];
 			if (elem == null) {
 				elem = AddChildElement (name);
 				Element.AppendChild (elem);
 			}
-			elem.InnerXml = value;
+			if (isXml)
+				elem.InnerXml = value;
+			else
+				elem.InnerText = value;
 		}
-		
+
 		public void UnsetMetadata (string name)
 		{
 			XmlElement elem = Element [name, MSBuildProject.Schema];
@@ -694,15 +720,15 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			}
 		}
 		
-		public string GetMetadata (string name)
+		public string GetMetadata (string name, bool isXml = false)
 		{
 			XmlElement elem = Element [name, MSBuildProject.Schema];
 			if (elem != null)
-				return elem.InnerXml;
+				return isXml ? elem.InnerXml : elem.InnerText;
 			else
 				return null;
 		}
-		
+
 		public bool GetMetadataIsFalse (string name)
 		{
 			return String.Compare (GetMetadata (name), "False", StringComparison.OrdinalIgnoreCase) == 0;
@@ -712,7 +738,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		{
 			foreach (XmlNode node in Element.ChildNodes) {
 				if (node is XmlElement)
-					SetMetadata (node.LocalName, node.InnerXml);
+					SetMetadata (node.LocalName, node.InnerXml, true);
 			}
 		}
 	}

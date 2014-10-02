@@ -123,8 +123,14 @@ namespace MonoDevelop.CSharp
 			sb.AppendLine ();
 			
 			foreach (ProjectReference lib in projectItems.GetAll <ProjectReference> ()) {
-				if (lib.ReferenceType == ReferenceType.Project && !(lib.OwnerProject.ParentSolution.FindProjectByName (lib.Reference) is DotNetProject))
-					continue;
+				if (lib.ReferenceType == ReferenceType.Project) {
+					var ownerProject = lib.OwnerProject;
+					if (ownerProject != null) {
+						var parentSolution = ownerProject.ParentSolution;
+						if (parentSolution != null && !(parentSolution.FindProjectByName (lib.Reference) is DotNetProject))
+							continue;
+					}
+				} 
 				string refPrefix = string.IsNullOrEmpty (lib.Aliases) ? "" : lib.Aliases + "=";
 				foreach (string fileName in lib.GetReferencedFileNames (configSelector)) {
 					switch (lib.ReferenceType) {
@@ -160,13 +166,19 @@ namespace MonoDevelop.CSharp
 					}
 				}
 			}
-			
+
+			if (alreadyAddedReference.Any (reference => SystemAssemblyService.ContainsReferenceToSystemRuntime (reference))) {
+				LoggingService.LogInfo ("Found PCLv2 assembly.");
+				var facades = runtime.FindFacadeAssembliesForPCL (project.TargetFramework);
+				foreach (var facade in facades)
+					AppendQuoted (sb, "/r:", facade);
+			}
+
 			string sysCore = project.AssemblyContext.GetAssemblyFullName ("System.Core", project.TargetFramework);
-			if (sysCore != null) {
-				sysCore = project.AssemblyContext.GetAssemblyLocation (sysCore, project.TargetFramework);
-				if (sysCore != null && 
-					!alreadyAddedReference.Any (r => (r == sysCore || r.EndsWith ("System.Core.dll", StringComparison.OrdinalIgnoreCase))))
-					AppendQuoted (sb, "/r:", sysCore);
+			if (sysCore != null && !alreadyAddedReference.Contains (sysCore)) {
+				var asm = project.AssemblyContext.GetAssemblyFromFullName (sysCore, null, project.TargetFramework);
+				if (asm != null)
+					AppendQuoted (sb, "/r:", asm.Location);
 			}
 			
 			sb.AppendLine ("/nologo");
@@ -176,36 +188,31 @@ namespace MonoDevelop.CSharp
 			if (configuration.SignAssembly) {
 				if (File.Exists (configuration.AssemblyKeyFile))
 					AppendQuoted (sb, "/keyfile:", configuration.AssemblyKeyFile);
+				if (configuration.DelaySign)
+					sb.AppendLine ("/delaySign");
 			}
-			
-			if (configuration.DebugMode) {
-//				sb.AppendLine ("/debug:+");
-				sb.AppendLine ("/debug:full");
+
+			var debugType = compilerParameters.DebugType;
+			if (string.IsNullOrEmpty (debugType)) {
+				debugType = configuration.DebugMode ? "full" : "none";
+			} else if (string.Equals (debugType, "pdbonly", StringComparison.OrdinalIgnoreCase)) {
+				//old Mono compilers don't support pdbonly
+				if (monoRuntime != null && !monoRuntime.HasMultitargetingMcs)
+					debugType = "full";
 			}
-			
-			switch (compilerParameters.LangVersion) {
-			case LangVersion.Default:
-				break;
-			case LangVersion.ISO_1:
-				sb.AppendLine ("/langversion:ISO-1");
-				break;
-			case LangVersion.ISO_2:
-				sb.AppendLine ("/langversion:ISO-2");
-				break;
-			case LangVersion.Version3:
-				sb.AppendLine ("/langversion:3");
-				break;
-			case LangVersion.Version4:
-				sb.AppendLine ("/langversion:4");
-				break;
-			case LangVersion.Version5:
-				sb.AppendLine ("/langversion:5");
-				break;
-			default:
-				string message = "Invalid LangVersion enum value '" + compilerParameters.LangVersion.ToString () + "'";
-				monitor.ReportError (message, null);
-				LoggingService.LogError (message);
-				return null;
+			if (!string.Equals (debugType, "none", StringComparison.OrdinalIgnoreCase)) {
+					sb.AppendLine ("/debug:" + debugType);
+			}
+
+			if (compilerParameters.LangVersion != LangVersion.Default) {
+				var langVersionString = CSharpCompilerParameters.TryLangVersionToString (compilerParameters.LangVersion);
+				if (langVersionString == null) {
+					string message = "Invalid LangVersion enum value '" + compilerParameters.LangVersion.ToString () + "'";
+					monitor.ReportError (message, null);
+					LoggingService.LogError (message);
+					return null;
+				}
+				sb.AppendLine ("/langversion:" + langVersionString);
 			}
 			
 			// mcs default is + but others might not be
@@ -457,11 +464,10 @@ namespace MonoDevelop.CSharp
 				pw.WaitForOutput ();
 			}
 			int exitCode = pw.ExitCode;
-			bool cancelRequested = pw.CancelRequested;
-			outwr.Close();
+			outwr.Close ();
 			errwr.Close ();
-			pw.Dispose();
-			return cancelRequested ? 0 : exitCode;
+			pw.Dispose ();
+			return exitCode;
 		}
 		
 		// Snatched from our codedom code, with some changes to make it compatible with csc

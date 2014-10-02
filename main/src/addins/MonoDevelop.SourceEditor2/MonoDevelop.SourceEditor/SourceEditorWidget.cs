@@ -44,8 +44,8 @@ using ICSharpCode.NRefactory.TypeSystem;
 using MonoDevelop.Ide.TypeSystem;
 using Mono.TextEditor.Highlighting;
 using MonoDevelop.SourceEditor.QuickTasks;
-using ICSharpCode.NRefactory.CSharp;
 using ICSharpCode.NRefactory.Semantics;
+using ICSharpCode.NRefactory.Refactoring;
 
 namespace MonoDevelop.SourceEditor
 {
@@ -156,6 +156,36 @@ namespace MonoDevelop.SourceEditor
 		public Gtk.VBox Vbox {
 			get { return this.vbox; }
 		}
+
+		public bool SearchWidgetHasFocus {
+			get {
+				if (HasAnyFocusedChild (searchAndReplaceWidget) || HasAnyFocusedChild (gotoLineNumberWidget))
+					return true;
+				return false;
+			}
+		}
+
+		static bool HasAnyFocusedChild (Widget widget)
+		{
+			// Seems that this is the only reliable way doing it on os x and linux :/
+			if (widget == null)
+				return false;
+			var stack = new Stack<Widget> ();
+			stack.Push (widget);
+			while (stack.Count > 0) {
+				var cur = stack.Pop ();
+				if (cur.HasFocus) {
+					return true;
+				}
+				var c = cur as Gtk.Container;
+				if (c!= null) {
+					foreach (var child in c.Children) {
+						stack.Push (child);
+					}
+				}
+			}
+			return false;
+		}
 		
 		public class Border : Gtk.DrawingArea
 		{
@@ -185,7 +215,13 @@ namespace MonoDevelop.SourceEditor
 					return scrolledWindow.Vadjustment;
 				}
 			}
-			
+
+			public QuickTaskStrip Strip {
+				get {
+					return strip;
+				}
+			}
+
 			public DecoratedScrolledWindow (SourceEditorWidget parent)
 			{
 				this.parent = parent;
@@ -197,7 +233,37 @@ namespace MonoDevelop.SourceEditor
 				strip.VAdjustment = scrolledWindow.Vadjustment;
 				PackEnd (strip, false, true, 0);
 
-				parent.quickTaskProvider.ForEach (p => AddQuickTaskProvider (p));
+				parent.quickTaskProvider.ForEach (AddQuickTaskProvider);
+
+				QuickTaskStrip.EnableFancyFeatures.Changed += FancyFeaturesChanged;
+				FancyFeaturesChanged (null, null);
+			}
+
+			void FancyFeaturesChanged (object sender, EventArgs e)
+			{
+				if (QuickTaskStrip.EnableFancyFeatures) {
+					GtkWorkarounds.SetOverlayScrollbarPolicy (scrolledWindow, PolicyType.Automatic, PolicyType.Never);
+					scrolledWindow.VScrollbar.SizeRequested += SuppressSize;
+					scrolledWindow.VScrollbar.ExposeEvent += SuppressExpose;
+				} else {
+					GtkWorkarounds.SetOverlayScrollbarPolicy (scrolledWindow, PolicyType.Automatic, PolicyType.Automatic);
+					scrolledWindow.VScrollbar.SizeRequested -= SuppressSize;
+					scrolledWindow.VScrollbar.ExposeEvent -= SuppressExpose;
+				}
+				QueueResize ();
+			}
+
+			[GLib.ConnectBefore]
+			static void SuppressExpose (object o, ExposeEventArgs args)
+			{
+				args.RetVal = true;
+			}
+
+			[GLib.ConnectBefore]
+			static void SuppressSize (object o, SizeRequestedArgs args)
+			{
+				args.Requisition = Requisition.Zero;
+				args.RetVal = true;
 			}
 			
 			public void AddQuickTaskProvider (IQuickTaskProvider p)
@@ -227,6 +293,7 @@ namespace MonoDevelop.SourceEditor
 				if (scrolledWindow.Child != null)
 					RemoveEvents ();
 
+				QuickTaskStrip.EnableFancyFeatures.Changed -= FancyFeaturesChanged;
 				scrolledWindow.ButtonPressEvent -= PrepareEvent;
 				base.OnDestroyed ();
 			}
@@ -249,7 +316,7 @@ namespace MonoDevelop.SourceEditor
 			void OptionsChanged (object sender, EventArgs e)
 			{
 				TextEditor editor = (TextEditor)sender;
-				scrolledWindow.ModifyBg (StateType.Normal, editor.ColorStyle.Default.BackgroundColor);
+				scrolledWindow.ModifyBg (StateType.Normal, (Mono.TextEditor.HslColor)editor.ColorStyle.PlainText.Background);
 			}
 			
 			void RemoveEvents ()
@@ -318,7 +385,8 @@ namespace MonoDevelop.SourceEditor
 				this.lastActiveEditor = null;
 				this.splittedTextEditor = null;
 				view = null;
-				
+				parsedDocument = null;
+
 //				IdeApp.Workbench.StatusBar.ClearCaretState ();
 				if (parseInformationUpdaterWorkerThread != null) {
 					parseInformationUpdaterWorkerThread.Dispose ();
@@ -793,16 +861,24 @@ namespace MonoDevelop.SourceEditor
 		internal bool UseIncorrectMarkers { get; set; }
 		internal bool HasIncorrectEolMarker {
 			get {
+				string eol = DetectedEolMarker;
+				if (eol == null)
+					return false;
+				return eol != textEditor.Options.DefaultEolMarker;
+			}
+		}
+		string DetectedEolMarker {
+			get {
 				if (textEditor.IsDisposed) {
 					LoggingService.LogWarning ("SourceEditorWidget.cs: HasIncorrectEolMarker was called on disposed source editor widget." + Environment.NewLine + Environment.StackTrace);
-					return false;
+					return null;
 				}
 				var firstLine = Document.GetLine (1);
 				if (firstLine != null && firstLine.DelimiterLength > 0) {
 					string firstDelimiter = Document.GetTextAt (firstLine.Length, firstLine.DelimiterLength);
-					return firstDelimiter != textEditor.Options.DefaultEolMarker;
+					return firstDelimiter;
 				}
-				return false;
+				return null;
 			}
 		}
 
@@ -844,8 +920,10 @@ namespace MonoDevelop.SourceEditor
 			
 			if (messageBar == null) {
 				messageBar = new MonoDevelop.Components.InfoBar (MessageType.Warning);
+				string detectedEol = DetectedEolMarker.Replace ("\n", "NL").Replace ("\r", "CR");
+				string defaultEol = textEditor.Options.DefaultEolMarker.Replace ("\n", "NL").Replace ("\r", "CR");
 				messageBar.SetMessageLabel (GettextCatalog.GetString (
-					"<b>The file \"{0}\" has line endings which differ from the policy settings.</b>\n" +
+					"<b>The file \"{0}\" has line endings (" + detectedEol + ") which differ from the policy settings(" + defaultEol + ").</b>\n" +
 					"Do you want to convert the line endings?",
 					EllipsizeMiddle (Document.FileName, 50)));
 				
@@ -985,6 +1063,9 @@ namespace MonoDevelop.SourceEditor
 		public void Reload ()
 		{
 			try {
+				if (!System.IO.File.Exists (view.ContentName))
+					return;
+
 				view.StoreSettings ();
 				reloadSettings = true;
 				view.Load (view.ContentName);
@@ -1213,10 +1294,21 @@ namespace MonoDevelop.SourceEditor
 		
 		void SetSearchPatternToSelection ()
 		{
+			if (!TextEditor.IsSomethingSelected) {
+				int start = textEditor.Caret.Offset;
+				int end = start;
+				while (start - 1 >= 0 && DynamicAbbrevHandler.IsIdentifierPart (textEditor.GetCharAt (start - 1)))
+					start--;
+
+				while (end < textEditor.Length && DynamicAbbrevHandler.IsIdentifierPart (textEditor.GetCharAt (end)))
+					end++;
+				textEditor.Caret.Offset = end;
+				TextEditor.SetSelection (start, end);
+			}
+
 			if (TextEditor.IsSomethingSelected) {
 				var pattern = FormatPatternToSelectionOption (TextEditor.SelectedText);
-					
-				TextEditor.SearchPattern = pattern;
+				SearchAndReplaceOptions.SearchPattern = pattern;
 				SearchAndReplaceWidget.UpdateSearchHistory (TextEditor.SearchPattern);
 			}
 			if (searchAndReplaceWidget != null)
@@ -1530,7 +1622,36 @@ namespace MonoDevelop.SourceEditor
 			OnTasksUpdated (EventArgs.Empty);
 		}
 		#endregion
-	
+
+		internal void NextIssue ()
+		{
+			if (!QuickTaskStrip.EnableFancyFeatures)
+				return;
+			mainsw.Strip.GotoTask (mainsw.Strip.SearchNextTask (QuickTaskStrip.HoverMode.NextMessage));
+		}	
+
+		internal void PrevIssue ()
+		{
+			if (!QuickTaskStrip.EnableFancyFeatures)
+				return;
+			mainsw.Strip.GotoTask (mainsw.Strip.SearchPrevTask (QuickTaskStrip.HoverMode.NextMessage));
+		}
+
+		internal void NextIssueError ()
+		{
+			if (!QuickTaskStrip.EnableFancyFeatures)
+				return;
+			mainsw.Strip.GotoTask (mainsw.Strip.SearchNextTask (QuickTaskStrip.HoverMode.NextError));
+		}	
+
+		internal void PrevIssueError ()
+		{
+			if (!QuickTaskStrip.EnableFancyFeatures)
+				return;
+			mainsw.Strip.GotoTask (mainsw.Strip.SearchPrevTask (QuickTaskStrip.HoverMode.NextError));
+		}
+
+
 	}
 
 	class ErrorMarker : UnderlineMarker
@@ -1544,7 +1665,6 @@ namespace MonoDevelop.SourceEditor
 			// may be null if no line is assigned to the error.
 			Wave = true;
 			
-			ColorName = info.ErrorType == ErrorType.Warning ? ColorScheme.WarningUnderlineString : ColorScheme.ErrorUnderlineString;
 			StartCol = Info.Region.BeginColumn + 1;
 			if (Info.Region.EndColumn > StartCol) {
 				EndCol = Info.Region.EndColumn;
@@ -1563,6 +1683,13 @@ namespace MonoDevelop.SourceEditor
 				}
 				EndCol = Info.Region.BeginColumn + o - start + 1;
 			}
+		}
+
+		public override void Draw (TextEditor editor, Cairo.Context cr, double y, LineMetrics metrics)
+		{
+			Color = Info.ErrorType == ErrorType.Warning ? editor.ColorStyle.UnderlineWarning.Color : editor.ColorStyle.UnderlineError.Color;
+
+			base.Draw (editor, cr, y, metrics);
 		}
 	}
 }

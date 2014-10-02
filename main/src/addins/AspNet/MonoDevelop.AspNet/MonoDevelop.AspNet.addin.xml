@@ -6,7 +6,7 @@
        url         = "http://www.monodevelop.com/"
        description = "Support for ASP.NET projects, including editing, compiling, previewing and deploying to remote servers."
        category    = "Web Development"
-       version     = "4.0.1">
+       version     = "4.0.14">
 	
 	<Runtime>
 		<Import file="Schemas/xhtml1-strict.xsd" />
@@ -15,12 +15,12 @@
 	</Runtime>
 
 	<Dependencies>
-		<Addin id="Core" version="4.0.1"/>
-		<Addin id="Ide" version="4.0.1"/>
-		<Addin id="DesignerSupport" version="4.0.1"/>
-		<Addin id="Deployment" version="4.0.1"/>
-		<Addin id="XmlEditor" version="4.0.1" />
-		<Addin id="SourceEditor2" version="4.0.1"/>
+		<Addin id="Core" version="4.0.14"/>
+		<Addin id="Ide" version="4.0.14"/>
+		<Addin id="DesignerSupport" version="4.0.14"/>
+		<Addin id="Deployment" version="4.0.14"/>
+		<Addin id="XmlEditor" version="4.0.14" />
+		<Addin id="SourceEditor2" version="4.0.14"/>
 	</Dependencies>
 
 	<Extension path = "/MonoDevelop/ProjectModel/MSBuildItemTypes">
@@ -118,7 +118,7 @@
 
 	<Extension path = "/MonoDevelop/TypeSystem/Parser">
 		<Parser class = "MonoDevelop.AspNet.Parser.AspNetParser" mimeType="application/x-aspx, application/x-ascx, application/x-master-page" />
-		<Parser class = "MonoDevelop.Html.HtmlParser" mimeType=".text/html, application/x-spark" />
+		<Parser class = "MonoDevelop.Html.HtmlParser" mimeType="text/html, application/x-spark" />
 	</Extension>
 
 	<Extension path = "/MonoDevelop/ProjectModel/SerializableClasses">
@@ -231,12 +231,18 @@
 		<MimeType id="text/css" _description="CSS document" icon="md-html-file-icon" isText="true">
 			<File pattern="*.css" />
 		</MimeType>
+		<MimeType id="text/x-less" _description="LESS, CSS document" icon="md-html-file-icon" isText="true">
+			<File pattern="*.less" />
+		</MimeType>
 		<MimeType id="text/html" _description="HTML document" icon="md-html-file-icon" isText="true">
 			<File pattern="*.html|*.htm" />
 		</MimeType>
 		<MimeType id="application/x-spark" _description="Spark View template" icon="md-html-file-icon" isText="true"
 			baseType="text/html">
 			<File pattern="*.spark" />
+		</MimeType>
+		<MimeType id="application/typescript" _description="Typescript source code" icon="md-html-file-icon" isText="true">
+			<File pattern="*.ts" />
 		</MimeType>
 	</Extension>
 
@@ -270,5 +276,9 @@
 
 	<Extension path = "/MonoDevelop/Core/ExecutionHandlers">
 		<ExecutionHandler id="AspNet" class = "MonoDevelop.AspNet.AspNetExecutionHandler"/>
+	</Extension>
+	
+	<Extension path = "/MonoDevelop/Ide/CompletionCharacters">
+		<Complete id="Html" insertbefore="Other" insertafter="C#" language="Html" commitOnSpace="True" commitChars="{}[]().,:;+-*/%&amp;|^!~=&lt;&gt;?@#'&quot;\"/>
 	</Extension>
 </Addin>

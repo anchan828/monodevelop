@@ -31,6 +31,7 @@ using System.Threading;
 using MonoDevelop.Ide;
 using MonoDevelop.CodeIssues;
 using MonoDevelop.AnalysisCore.Fixes;
+using Mono.TextEditor;
 
 namespace MonoDevelop.CodeActions
 {
@@ -55,7 +56,9 @@ namespace MonoDevelop.CodeActions
 		
 		public override System.Collections.Generic.IEnumerable<CodeAction> GetActions (MonoDevelop.Ide.Gui.Document document, object refactoringContext, TextLocation loc, CancellationToken cancellationToken)
 		{
-			yield return new AnalysisCodeAction (Action, Result);
+			yield return new AnalysisCodeAction (Action, Result) {
+				DocumentRegion = Action.DocumentRegion
+			};
 		}
 
 		internal class AnalysisCodeAction : CodeAction
@@ -76,9 +79,20 @@ namespace MonoDevelop.CodeActions
 				Result = result;
 			}
 	
-			public override void Run (MonoDevelop.Ide.Gui.Document document, TextLocation loc)
+			public override void Run (object context, object script)
 			{
 				Action.Fix ();
+			}
+			
+			public override bool SupportsBatchRunning {
+				get {
+					return Action.SupportsBatchFix;
+				}
+			}
+			
+			public override void BatchRun (MonoDevelop.Ide.Gui.Document document, TextLocation loc)
+			{
+				Action.BatchFix ();
 			}
 
 			public void ShowOptions (object sender, EventArgs e)

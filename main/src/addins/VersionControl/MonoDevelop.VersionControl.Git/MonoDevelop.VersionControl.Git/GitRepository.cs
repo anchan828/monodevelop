@@ -30,10 +30,8 @@ using System;
 using System.Linq;
 using System.IO;
 using MonoDevelop.Core;
-using MonoDevelop.Core.Execution;
 using System.Collections.Generic;
 using System.Text;
-using System.Globalization;
 using MonoDevelop.Ide;
 using NGit;
 using NGit.Storage.File;
@@ -43,20 +41,26 @@ using NGit.Treewalk;
 using NGit.Treewalk.Filter;
 using NGit.Dircache;
 using NGit.Transport;
-using NGit.Errors;
-using NGit.Api.Errors;
 using NGit.Diff;
 using NGit.Merge;
-using Mono.TextEditor;
 using NGit.Submodule;
 
 namespace MonoDevelop.VersionControl.Git
 {
+	[Flags]
+	public enum GitUpdateOptions
+	{
+		None = 0x0,
+		SaveLocalChanges = 0x1,
+		UpdateSubmodules = 0x2,
+		NormalUpdate = SaveLocalChanges | UpdateSubmodules,
+	}
+
 	public class GitRepository : UrlBasedRepository
 	{
 		static readonly byte[] EmptyContent = new byte[0];
 
-		LocalGitRepository RootRepository {
+		internal LocalGitRepository RootRepository {
 			get; set;
 		}
 
@@ -112,10 +116,6 @@ namespace MonoDevelop.VersionControl.Git
 			}
 		}
 
-		public FilePath RootPath {
-			get; private set;
-		}
-
 		public override void CopyConfigurationFrom (Repository other)
 		{
 			base.CopyConfigurationFrom (other);
@@ -142,7 +142,7 @@ namespace MonoDevelop.VersionControl.Git
 			return GetCommitTextContent (c, localFile);
 		}
 				
-		RevCommit GetHeadCommit (NGit.Repository repository)
+		static RevCommit GetHeadCommit (NGit.Repository repository)
 		{
 			RevWalk rw = new RevWalk (repository);
 			ObjectId headId = repository.Resolve (Constants.HEAD);
@@ -156,7 +156,7 @@ namespace MonoDevelop.VersionControl.Git
 			return GetStashes (RootRepository);
 		}
 
-		public StashCollection GetStashes (NGit.Repository repository)
+		public static StashCollection GetStashes (NGit.Repository repository)
 		{
 			return new StashCollection (repository);
 		}
@@ -252,6 +252,10 @@ namespace MonoDevelop.VersionControl.Git
 			return GetDirectoryVersionInfo (localDirectory, null, getRemoteStatus, recursive);
 		}
 
+		// Used for checking if we will dupe data.
+		// This way we reduce the number of GitRevisions created and RevWalks done.
+		NGit.Repository versionInfoCacheRepository;
+		GitRevision versionInfoCacheRevision;
 		VersionInfo[] GetDirectoryVersionInfo (FilePath localDirectory, IEnumerable<FilePath> localFileNames, bool getRemoteStatus, bool recursive)
 		{
 			List<VersionInfo> versions = new List<VersionInfo> ();
@@ -267,8 +271,7 @@ namespace MonoDevelop.VersionControl.Git
 						if (Directory.Exists (p)) {
 							if (recursive)
 								versions.AddRange (GetDirectoryVersionInfo (p, getRemoteStatus, true));
-							else
-								versions.Add (new VersionInfo (p, "", true, VersionStatus.Versioned, arev, VersionStatus.Versioned, null));
+							versions.Add (new VersionInfo (p, "", true, VersionStatus.Versioned, arev, VersionStatus.Versioned, null));
 						}
 						else {
 							localFiles.Add (p);
@@ -285,7 +288,14 @@ namespace MonoDevelop.VersionControl.Git
 				
 				localFileNames = localFiles;
 			} else {
-				CollectFiles (existingFiles, localDirectory, recursive);
+				List<FilePath> directories = new List<FilePath> ();
+				CollectFiles (existingFiles, directories, localDirectory, recursive);
+				foreach (var group in GroupByRepository (directories)) {
+					var repository = group.Key;
+					var arev = new GitRevision (this, repository, "");
+					foreach (var p in group)
+						versions.Add (new VersionInfo (p, "", true, VersionStatus.Versioned, arev, VersionStatus.Versioned, null));
+				}
 			}
 
 			IEnumerable<FilePath> paths;
@@ -293,27 +303,33 @@ namespace MonoDevelop.VersionControl.Git
 				if (recursive) {
 					paths = new [] { localDirectory };
 				} else {
-					paths = Directory.GetFiles (localDirectory).Select (f => (FilePath)f).ToArray ();
+					if (Directory.Exists (localDirectory))
+						paths = Directory.GetFiles (localDirectory).Select (f => (FilePath)f);
+					else
+						paths = new FilePath [0];
 				}
 			} else {
-				paths = localFileNames.Select (f => f).ToArray ();
+				paths = localFileNames;
 			}
 
-			foreach (var group in paths.GroupBy (p => GetRepository (p))) {
+			foreach (var group in GroupByRepository (paths)) {
 				var repository = group.Key;
-				var files = group.ToArray ();
-				
-				GitRevision rev;
-				var headCommit = GetHeadCommit (repository);
-				if (headCommit != null)
-					rev = new GitRevision (this, repository, headCommit.Id.Name);
-				else
-					rev = null;
 
-				GetDirectoryVersionInfoCore (repository, rev, files.ToArray (), existingFiles, nonVersionedMissingFiles, versions);
+				GitRevision rev = null;
+				if (versionInfoCacheRepository == null || versionInfoCacheRepository != repository) {
+					versionInfoCacheRepository = repository;
+					RevCommit headCommit = GetHeadCommit (repository);
+					if (headCommit != null) {
+						rev = new GitRevision (this, repository, headCommit.Id.Name);
+						versionInfoCacheRevision = rev;
+					}
+				} else
+					rev = versionInfoCacheRevision;
+
+				GetDirectoryVersionInfoCore (repository, rev, group, existingFiles, nonVersionedMissingFiles, versions);
 				
-				// Existing files for which git did not report an status are supposed to be tracked
-				foreach (FilePath file in existingFiles.Where (f => files.Contains (f))) {
+				// Existing files for which git did not report a status are supposed to be tracked
+				foreach (FilePath file in existingFiles.Where (f => group.Contains (f))) {
 					VersionInfo vi = new VersionInfo (file, "", false, VersionStatus.Versioned, rev, VersionStatus.Versioned, null);
 					versions.Add (vi);
 				}
@@ -327,22 +343,22 @@ namespace MonoDevelop.VersionControl.Git
 			return versions.ToArray ();
 		}
 
-		void GetDirectoryVersionInfoCore (NGit.Repository repository, GitRevision rev, FilePath [] localPaths, HashSet<FilePath> existingFiles, HashSet<FilePath> nonVersionedMissingFiles, List<VersionInfo> versions)
+		static void GetDirectoryVersionInfoCore (NGit.Repository repository, GitRevision rev, IEnumerable<FilePath> localPaths, HashSet<FilePath> existingFiles, HashSet<FilePath> nonVersionedMissingFiles, List<VersionInfo> versions)
 		{
-			
-			var status = new FilteredStatus (repository, repository.ToGitPath (localPaths)).Call (); 
+			var filteredStatus = new FilteredStatus (repository, repository.ToGitPath (localPaths));
+			var status = filteredStatus.Call ();
 			HashSet<string> added = new HashSet<string> ();
-			Action<IEnumerable<string>, VersionStatus> AddFiles = delegate(IEnumerable<string> files, VersionStatus fstatus) {
+			Action<IEnumerable<string>, VersionStatus> AddFiles = delegate (IEnumerable<string> files, VersionStatus fstatus) {
 				foreach (string file in files) {
 					if (!added.Add (file))
 						continue;
 					FilePath statFile = repository.FromGitPath (file);
 					existingFiles.Remove (statFile.CanonicalPath);
 					nonVersionedMissingFiles.Remove (statFile.CanonicalPath);
-					versions.Add (new VersionInfo (statFile, "", false, fstatus, rev, VersionStatus.Versioned, null));
+					versions.Add (new VersionInfo (statFile, "", false, fstatus, rev, fstatus == VersionStatus.Ignored ? VersionStatus.Unversioned : VersionStatus.Versioned, null));
 				}
 			};
-			
+
 			AddFiles (status.GetAdded (), VersionStatus.Versioned | VersionStatus.ScheduledAdd);
 			AddFiles (status.GetChanged (), VersionStatus.Versioned | VersionStatus.Modified);
 			AddFiles (status.GetModified (), VersionStatus.Versioned | VersionStatus.Modified);
@@ -350,6 +366,7 @@ namespace MonoDevelop.VersionControl.Git
 			AddFiles (status.GetMissing (), VersionStatus.Versioned | VersionStatus.ScheduledDelete);
 			AddFiles (status.GetConflicting (), VersionStatus.Versioned | VersionStatus.Conflicted);
 			AddFiles (status.GetUntracked (), VersionStatus.Unversioned);
+			AddFiles (filteredStatus.GetIgnoredNotInIndex (), VersionStatus.Ignored);
 		}
 		
 		protected override VersionControlOperation GetSupportedOperations (VersionInfo vinfo)
@@ -362,13 +379,17 @@ namespace MonoDevelop.VersionControl.Git
 			return ops;
 		}
 
-		void CollectFiles (HashSet<FilePath> files, FilePath dir, bool recursive)
+		static void CollectFiles (HashSet<FilePath> files, List<FilePath> directories, FilePath dir, bool recursive)
 		{
+			if (!Directory.Exists (dir))
+				return;
 			foreach (string file in Directory.GetFiles (dir))
 				files.Add (new FilePath (file).CanonicalPath);
-			if (recursive) {
-				foreach (string sub in Directory.GetDirectories (dir))
-					CollectFiles (files, sub, true);
+
+			foreach (string sub in Directory.GetDirectories (dir)) {
+				directories.Add (new FilePath (sub));
+				if (recursive)
+					CollectFiles (files, directories, sub, true);
 			}
 		}
 
@@ -419,26 +440,18 @@ namespace MonoDevelop.VersionControl.Git
 			IEnumerable<DiffEntry> statusList = null;
 			
 			monitor.BeginTask (GettextCatalog.GetString ("Updating"), 5);
-			
+
 			// Fetch remote commits
-			string remote = GetCurrentRemote ();
-			if (remote == null)
-				throw new InvalidOperationException ("No remotes defined");
-			monitor.Log.WriteLine (GettextCatalog.GetString ("Fetching from '{0}'", remote));
-			RemoteConfig remoteConfig = new RemoteConfig (RootRepository.GetConfig (), remote);
-			Transport tn = Transport.Open (RootRepository, remoteConfig);
-			using (var gm = new GitMonitor (monitor))
-				tn.Fetch (gm, null);
-			monitor.Step (1);
-			
+			Fetch (monitor);
 			string upstreamRef = GitUtil.GetUpstreamSource (RootRepository, GetCurrentBranch ());
 			if (upstreamRef == null)
 				upstreamRef = GetCurrentRemote () + "/" + GetCurrentBranch ();
-			
+
+			GitUpdateOptions options = GitService.StashUnstashWhenUpdating ? GitUpdateOptions.NormalUpdate : GitUpdateOptions.UpdateSubmodules;
 			if (GitService.UseRebaseOptionWhenPulling)
-				Rebase (upstreamRef, GitService.StashUnstashWhenUpdating, monitor);
+				Rebase (upstreamRef, options, monitor);
 			else
-				Merge (upstreamRef, GitService.StashUnstashWhenUpdating, monitor);
+				Merge (upstreamRef, options, monitor);
 
 			monitor.Step (1);
 			
@@ -449,26 +462,122 @@ namespace MonoDevelop.VersionControl.Git
 			monitor.EndTask ();
 		}
 
+		public void Fetch (IProgressMonitor monitor)
+		{
+			string remote = GetCurrentRemote ();
+			if (remote == null)
+				throw new InvalidOperationException ("No remotes defined");
+
+			monitor.Log.WriteLine (GettextCatalog.GetString ("Fetching from '{0}'", remote));
+			RemoteConfig remoteConfig = new RemoteConfig (RootRepository.GetConfig (), remote);
+			Transport tn = Transport.Open (RootRepository, remoteConfig);
+			using (var gm = new GitMonitor (monitor))
+				tn.Fetch (gm, null);
+			monitor.Step (1);
+		}
+
+		bool GetSubmodulesToUpdate (List<string> UpdateSubmodules)
+		{
+			List<string> DirtySubmodules = new List<string> ();
+
+			// Iterate submodules and do status.
+			// SubmoduleStatus does not report changes for dirty submodules.
+			foreach (var submodule in CachedSubmodules) {
+				var submoduleGit = new NGit.Api.Git (submodule.Item2);
+				var statusCommand = submoduleGit.Status ();
+				var status = statusCommand.Call ();
+
+				if (status.IsClean ())
+					UpdateSubmodules.Add (submodule.Item1);
+				else
+					DirtySubmodules.Add (submodule.Item1);
+			}
+
+			if (DirtySubmodules.Count != 0) {
+				StringBuilder submodules = new StringBuilder (Environment.NewLine + Environment.NewLine);
+				foreach (var item in DirtySubmodules)
+					submodules.AppendLine (item);
+
+				AlertButton response = MessageService.GenericAlert (
+					MonoDevelop.Ide.Gui.Stock.Question,
+					GettextCatalog.GetString ("You have local changes in the submodules below"),
+					GettextCatalog.GetString ("Do you want continue? Detached HEADs will have their changes lost.{0}", submodules.ToString ()),
+					new AlertButton[] {
+							AlertButton.No,
+							new AlertButton ("Only unchanged"),
+							AlertButton.Yes
+						}
+				);
+
+				if (response == AlertButton.No)
+					return false;
+
+				if (response == AlertButton.Yes)
+					UpdateSubmodules.AddRange (DirtySubmodules);
+			}
+			return true;
+		}
+
+		[Obsolete ("Will be removed. Please use the one with GitUpdateOptions flags.")]
 		public void Rebase (string upstreamRef, bool saveLocalChanges, IProgressMonitor monitor)
+		{
+			Rebase (upstreamRef, saveLocalChanges ? GitUpdateOptions.SaveLocalChanges : GitUpdateOptions.None, monitor);
+		}
+
+		public void Rebase (string upstreamRef, GitUpdateOptions options, IProgressMonitor monitor)
 		{
 			StashCollection stashes = GitUtil.GetStashes (RootRepository);
 			Stash stash = null;
-			
+			NGit.Api.Git git = new NGit.Api.Git (RootRepository);
 			try
 			{
-				if (saveLocalChanges) {
-					monitor.BeginTask (GettextCatalog.GetString ("Rebasing"), 3);
+				monitor.BeginTask (GettextCatalog.GetString ("Rebasing"), 5);
+				List<string> UpdateSubmodules = new List<string> ();
+
+				// TODO: Fix stash so we don't have to do update before the main repo update.
+				if ((options & GitUpdateOptions.UpdateSubmodules) == GitUpdateOptions.UpdateSubmodules) {
+					monitor.Log.WriteLine (GettextCatalog.GetString ("Checking repository submodules"));
+					if (!GetSubmodulesToUpdate (UpdateSubmodules))
+						return;
+
+					monitor.Log.WriteLine (GettextCatalog.GetString ("Updating repository submodules"));
+					var submoduleUpdate = git.SubmoduleUpdate ();
+					foreach (var submodule in UpdateSubmodules)
+						submoduleUpdate.AddPath (submodule);
+
+					submoduleUpdate.Call ();
+					monitor.Step (1);
+				}
+
+				if ((options & GitUpdateOptions.SaveLocalChanges) != GitUpdateOptions.SaveLocalChanges) {
+					VersionStatus unclean = VersionStatus.Modified | VersionStatus.ScheduledAdd | VersionStatus.ScheduledDelete;
+					bool modified = false;
+					if (GetDirectoryVersionInfo (RootPath, false, true).Any (v => (v.Status & unclean) != VersionStatus.Unversioned))
+						modified = true;
+
+					if (modified) {
+						if (MessageService.GenericAlert (
+							MonoDevelop.Ide.Gui.Stock.Question,
+							GettextCatalog.GetString ("You have uncommitted changes"),
+							GettextCatalog.GetString ("What do you want to do?"),
+							AlertButton.Cancel,
+							new AlertButton ("Stash")) == AlertButton.Cancel)
+							return;
+
+						options |= GitUpdateOptions.SaveLocalChanges;
+					}
+				}
+
+				if ((options & GitUpdateOptions.SaveLocalChanges) == GitUpdateOptions.SaveLocalChanges) {
 					monitor.Log.WriteLine (GettextCatalog.GetString ("Saving local changes"));
 					using (var gm = new GitMonitor (monitor))
 						stash = stashes.Create (gm, GetStashName ("_tmp_"));
 					monitor.Step (1);
 				}
-				
-				NGit.Api.Git git = new NGit.Api.Git (RootRepository);
+
 				RebaseCommand rebase = git.Rebase ();
 				rebase.SetOperation (RebaseCommand.Operation.BEGIN);
 				rebase.SetUpstream (upstreamRef);
-				
 				var gmonitor = new GitMonitor (monitor);
 				rebase.SetProgressMonitor (gmonitor);
 				
@@ -503,6 +612,16 @@ namespace MonoDevelop.VersionControl.Git
 						}
 						result = rebase.Call ();
 					}
+
+					if ((options & GitUpdateOptions.UpdateSubmodules) == GitUpdateOptions.UpdateSubmodules) {
+						monitor.Log.WriteLine (GettextCatalog.GetString ("Updating repository submodules"));
+						var submoduleUpdate = git.SubmoduleUpdate ();
+						foreach (var submodule in UpdateSubmodules)
+							submoduleUpdate.AddPath (submodule);
+
+						submoduleUpdate.Call ();
+						monitor.Step (1);
+					}
 				} catch {
 					if (!aborted) {
 						rebase = git.Rebase ();
@@ -516,7 +635,7 @@ namespace MonoDevelop.VersionControl.Git
 				}
 				
 			} finally {
-				if (saveLocalChanges)
+				if ((options & GitUpdateOptions.SaveLocalChanges) == GitUpdateOptions.SaveLocalChanges)
 					monitor.Step (1);
 				
 				// Restore local changes
@@ -525,25 +644,67 @@ namespace MonoDevelop.VersionControl.Git
 					using (var gm = new GitMonitor (monitor))
 						stash.Apply (gm);
 					stashes.Remove (stash);
-					monitor.EndTask ();
 				}
-			}			
+				monitor.EndTask ();
+			}
 		}
-		
-		public void Merge (string branch, bool saveLocalChanges, IProgressMonitor monitor)
+
+		[Obsolete ("Will be removed. Please use the one with GitUpdateOptions flags.")]
+		public void Merge (string upstreamRef, bool saveLocalChanges, IProgressMonitor monitor)
+		{
+			Merge (upstreamRef, saveLocalChanges ? GitUpdateOptions.SaveLocalChanges : GitUpdateOptions.None, monitor);
+		}
+
+		public void Merge (string branch, GitUpdateOptions options, IProgressMonitor monitor)
 		{
 			IEnumerable<DiffEntry> statusList = null;
 			Stash stash = null;
 			StashCollection stashes = GetStashes (RootRepository);
-			monitor.BeginTask (null, 4);
-			
+			NGit.Api.Git git = new NGit.Api.Git (RootRepository);
+
 			try {
+				monitor.BeginTask (GettextCatalog.GetString ("Merging"), 5);
+				List<string> UpdateSubmodules = new List<string> ();
+
+				// TODO: Fix stash so we don't have to do update before the main repo update.
+				if ((options & GitUpdateOptions.UpdateSubmodules) == GitUpdateOptions.UpdateSubmodules) {
+					monitor.Log.WriteLine (GettextCatalog.GetString ("Checking repository submodules"));
+					if (!GetSubmodulesToUpdate (UpdateSubmodules))
+						return;
+
+					monitor.Log.WriteLine (GettextCatalog.GetString ("Updating repository submodules"));
+					var submoduleUpdate = git.SubmoduleUpdate ();
+					foreach (var submodule in UpdateSubmodules)
+						submoduleUpdate.AddPath (submodule);
+
+					submoduleUpdate.Call ();
+					monitor.Step (1);
+				}
+
 				// Get a list of files that are different in the target branch
 				statusList = GitUtil.GetChangedFiles (RootRepository, branch);
 				monitor.Step (1);
-				
-				if (saveLocalChanges) {
-					monitor.BeginTask (GettextCatalog.GetString ("Merging"), 3);
+
+				if ((options & GitUpdateOptions.SaveLocalChanges) != GitUpdateOptions.SaveLocalChanges) {
+					VersionStatus unclean = VersionStatus.Modified | VersionStatus.ScheduledAdd | VersionStatus.ScheduledDelete;
+					bool modified = false;
+					if (GetDirectoryVersionInfo (RootPath, false, true).Any (v => (v.Status & unclean) != VersionStatus.Unversioned))
+						modified = true;
+
+					if (modified) {
+						if (MessageService.GenericAlert (
+							MonoDevelop.Ide.Gui.Stock.Question,
+							GettextCatalog.GetString ("You have uncommitted changes"),
+							GettextCatalog.GetString ("What do you want to do?"),
+							AlertButton.Cancel,
+							new AlertButton ("Stash")) == AlertButton.Cancel)
+							return;
+
+						options |= GitUpdateOptions.SaveLocalChanges;
+					}
+				}
+
+				if ((options & GitUpdateOptions.SaveLocalChanges) == GitUpdateOptions.SaveLocalChanges) {
 					monitor.Log.WriteLine (GettextCatalog.GetString ("Saving local changes"));
 					using (var gm = new GitMonitor (monitor))
 						stash = stashes.Create (gm, GetStashName ("_tmp_"));
@@ -553,8 +714,7 @@ namespace MonoDevelop.VersionControl.Git
 				// Apply changes
 				
 				ObjectId branchId = RootRepository.Resolve (branch);
-				
-				NGit.Api.Git git = new NGit.Api.Git (RootRepository);
+
 				MergeCommandResult mergeResult = git.Merge ().SetStrategy (MergeStrategy.RESOLVE).Include (branchId).Call ();
 				if (mergeResult.GetMergeStatus () == MergeStatus.CONFLICTING || mergeResult.GetMergeStatus () == MergeStatus.FAILED) {
 					var conflicts = mergeResult.GetConflicts ();
@@ -575,9 +735,18 @@ namespace MonoDevelop.VersionControl.Git
 					if (commit)
 						git.Commit ().Call ();
 				}
-				
+
+				if ((options & GitUpdateOptions.UpdateSubmodules) == GitUpdateOptions.UpdateSubmodules) {
+					monitor.Log.WriteLine (GettextCatalog.GetString ("Updating repository submodules"));
+					var submoduleUpdate = git.SubmoduleUpdate ();
+					foreach (var submodule in CachedSubmodules)
+						submoduleUpdate.AddPath (submodule.Item1);
+
+					submoduleUpdate.Call ();
+					monitor.Step (1);
+				}
 			} finally {
-				if (saveLocalChanges)
+				if ((options & GitUpdateOptions.SaveLocalChanges) == GitUpdateOptions.SaveLocalChanges)
 					monitor.Step (1);
 				
 				// Restore local changes
@@ -586,19 +755,17 @@ namespace MonoDevelop.VersionControl.Git
 					using (var gm = new GitMonitor (monitor))
 						stash.Apply (gm);
 					stashes.Remove (stash);
-					monitor.EndTask ();
+					monitor.Step (1);
 				}
+				monitor.EndTask ();
 			}
-			monitor.Step (1);
 			
 			// Notify changes
 			if (statusList != null)
 				NotifyFileChanges (monitor, statusList);
-			
-			monitor.EndTask ();
 		}
 
-		ConflictResult ResolveConflict (string file)
+		static ConflictResult ResolveConflict (string file)
 		{
 			ConflictResult res = ConflictResult.Abort;
 			DispatchService.GuiSyncDispatch (delegate {
@@ -636,7 +803,7 @@ namespace MonoDevelop.VersionControl.Git
 			NGit.Api.Git git = new NGit.Api.Git (RootRepository);
 			NGit.Api.CommitCommand commit = git.Commit ();
 			commit.SetMessage (message);
-			
+
 			if (changeSet.ExtendedProperties.Contains ("Git.AuthorName")) {
 				commit.SetAuthor ((string)changeSet.ExtendedProperties ["Git.AuthorName"], (string)changeSet.ExtendedProperties ["Git.AuthorEmail"]);
 			}
@@ -671,6 +838,12 @@ namespace MonoDevelop.VersionControl.Git
 				iter.Next (1);
 			}
 		}
+
+		public bool IsUserInfoDefault ()
+		{
+			UserConfig config = RootRepository.GetConfig ().Get (UserConfig.KEY);
+			return config.IsCommitterNameImplicit () && config.IsCommitterEmailImplicit ();
+		}
 		
 		public void GetUserInfo (out string name, out string email)
 		{
@@ -694,15 +867,26 @@ namespace MonoDevelop.VersionControl.Git
 			cmd.SetRemote ("origin");
 			cmd.SetBranch ("refs/heads/master");
 			cmd.SetDirectory ((string)targetLocalPath);
+			cmd.SetCloneSubmodules (true);
 			using (var gm = new GitMonitor (monitor, 4)) {
 				cmd.SetProgressMonitor (gm);
-				cmd.Call ();
+				try {
+					cmd.Call ();
+				} catch (NGit.Api.Errors.JGitInternalException e) {
+					// We cancelled and NGit throws.
+					// Or URL is wrong.
+					if (e.InnerException is NGit.Errors.MissingObjectException ||
+						e.InnerException is NGit.Errors.TransportException ||
+						e.InnerException is NGit.Errors.NotSupportedException) {
+						FileService.DeleteDirectory (targetLocalPath);
+					}
+				}
 			}
 		}
 
 		protected override void OnRevert (FilePath[] localPaths, bool recurse, IProgressMonitor monitor)
 		{
-			foreach (var group in localPaths.GroupBy (f => GetRepository (f))) {
+			foreach (var group in GroupByRepository (localPaths)) {
 				var repository = group.Key;
 				var files = group.ToArray ();
 
@@ -791,7 +975,7 @@ namespace MonoDevelop.VersionControl.Git
 			monitor.BeginTask (null, files.Length);
 
 			foreach (FilePath p in changedFiles) {
-				FileService.NotifyFileChanged (p);
+				FileService.NotifyFileChanged (p, true);
 				monitor.Step (1);
 			}
 			foreach (FilePath p in removedFiles) {
@@ -802,11 +986,12 @@ namespace MonoDevelop.VersionControl.Git
 			}
 		}
 		
-		bool IsSubpath (string basePath, string childPath)
+		static bool IsSubpath (string basePath, string childPath)
 		{
+			// FIXME: use FilePath?
 			if (basePath [basePath.Length - 1] == '/')
-				return childPath.StartsWith (basePath);
-			return childPath.StartsWith (basePath + "/");
+				return childPath.StartsWith (basePath, StringComparison.InvariantCulture);
+			return childPath.StartsWith (basePath + "/", StringComparison.InvariantCulture);
 		}
 
 		protected override void OnRevertRevision (FilePath localPath, Revision revision, IProgressMonitor monitor)
@@ -830,13 +1015,22 @@ namespace MonoDevelop.VersionControl.Git
 
 		protected override void OnRevertToRevision (FilePath localPath, Revision revision, IProgressMonitor monitor)
 		{
-			throw new System.NotImplementedException ();
+			NGit.Repository repo = GetRepository (localPath);
+			NGit.Api.Git git = new NGit.Api.Git (repo);
+			GitRevision gitRev = (GitRevision)revision;
+
+			// Rewrite file data from selected revision.
+			foreach (var path in GetFilesInPaths (new FilePath[] { localPath })) {
+				MonoDevelop.Projects.Text.TextFile.WriteFile (path, GetCommitTextContent (gitRev.Commit, path), null);
+			}
+
+			monitor.ReportSuccess (GettextCatalog.GetString ("Successfully reverted {0} to revision {1}", localPath, gitRev));
 		}
 
 
 		protected override void OnAdd (FilePath[] localPaths, bool recurse, IProgressMonitor monitor)
 		{
-			foreach (var group in localPaths.GroupBy (p => GetRepository (p))) {
+			foreach (var group in GroupByRepository (localPaths)) {
 				var repository = group.Key;
 				var files = group;
 
@@ -847,37 +1041,98 @@ namespace MonoDevelop.VersionControl.Git
 				cmd.Call ();
 			}
 		}
-		
-		protected override void OnDeleteFiles (FilePath[] localPaths, bool force, IProgressMonitor monitor)
-		{
-			DeleteCore (localPaths, force, monitor);
-			// Untracked files are not deleted by the rm command, so delete them now
-			foreach (var f in localPaths)
-				if (File.Exists (f))
-					File.Delete (f);
-		}
-		
-		protected override void OnDeleteDirectories (FilePath[] localPaths, bool force, IProgressMonitor monitor)
-		{
-			DeleteCore (localPaths, force, monitor);
 
-			// Untracked files are not deleted by the rm command, so delete them now
-			foreach (var f in localPaths)
-				if (Directory.Exists (f))
-					Directory.Delete (f, true);
+		[Obsolete ("Use the overload with keepLocal parameter")]
+		protected override void OnDeleteFiles (FilePath[] path, bool force, IProgressMonitor monitor)
+		{
 		}
 
-		void DeleteCore (FilePath[] localPaths, bool force, IProgressMonitor monitor)
+		protected override void OnDeleteFiles (FilePath[] localPaths, bool force, IProgressMonitor monitor, bool keepLocal)
 		{
-			foreach (var group in localPaths.GroupBy (p => GetRepository (p))) {
+			DeleteCore (localPaths, force, monitor, keepLocal);
+
+			foreach (var path in localPaths) {
+				if (keepLocal) {
+					// Undo addition of files.
+					VersionInfo info = GetVersionInfo (path, VersionInfoQueryFlags.IgnoreCache);
+					if (info != null && info.HasLocalChange (VersionStatus.ScheduledAdd)) {
+						// Revert addition.
+						Revert (path, false, monitor);
+					}
+				} else {
+					// Untracked files are not deleted by the rm command, so delete them now
+					if (File.Exists (path))
+						File.Delete (path);
+				}
+			}
+		}
+
+		[Obsolete ("Use the overload with keepLocal parameter")]
+		protected override void OnDeleteDirectories (FilePath[] path, bool force, IProgressMonitor monitor)
+		{
+		}
+
+		protected override void OnDeleteDirectories (FilePath[] localPaths, bool force, IProgressMonitor monitor, bool keepLocal)
+		{
+			DeleteCore (localPaths, force, monitor, keepLocal);
+
+			foreach (var path in localPaths) {
+				if (keepLocal) {
+					// Undo addition of directories and files.
+					foreach (var info in GetDirectoryVersionInfo (path, false, true)) {
+						if (info != null && info.HasLocalChange (VersionStatus.ScheduledAdd)) {
+							// Revert addition.
+							Revert (path, false, monitor);
+						}
+					}
+				} else {
+					// Untracked files are not deleted by the rm command, so delete them now
+					foreach (var f in localPaths)
+						if (Directory.Exists (f))
+							Directory.Delete (f, true);
+				}
+			}
+		}
+
+		void DeleteCore (FilePath[] localPaths, bool force, IProgressMonitor monitor, bool keepLocal)
+		{
+			foreach (var group in GroupByRepository (localPaths)) {
+				List<FilePath> backupFiles = new List<FilePath> ();
 				var repository = group.Key;
 				var files = group;
 
 				var git = new NGit.Api.Git (repository);
 				RmCommand rm = git.Rm ();
-				foreach (var f in files)
+				foreach (var f in files) {
+					// Create backups.
+					if (keepLocal) {
+						string newPath = "";
+						if (f.IsDirectory) {
+							newPath = FileService.CreateTempDirectory ();
+							FileService.CopyDirectory (f, newPath);
+						} else {
+							newPath = Path.GetTempFileName ();
+							File.Copy (f, newPath, true);
+						}
+						backupFiles.Add (newPath);
+					}
+
 					rm.AddFilepattern (repository.ToGitPath (f));
-				rm.Call ();
+				}
+
+				try {
+					rm.Call ();
+				} finally {
+					// Restore backups.
+					if (keepLocal) {
+						foreach (var backup in backupFiles) {
+							if (backup.IsDirectory)
+								FileService.MoveDirectory (backup, files.ElementAt (backupFiles.IndexOf (backup)));
+							else
+								File.Move (backup, files.ElementAt (backupFiles.IndexOf (backup)));
+						}
+					}
+				}
 			}
 		}
 
@@ -926,7 +1181,7 @@ namespace MonoDevelop.VersionControl.Git
 			return diffs.ToArray ();
 		}
 		
-		byte[] GetFileContent (string file)
+		static byte[] GetFileContent (string file)
 		{
 			return File.ReadAllBytes (file);
 		}
@@ -949,7 +1204,7 @@ namespace MonoDevelop.VersionControl.Git
 			return Mono.TextEditor.Utils.TextFileUtility.GetText (content);
 		}
 		
-		string GenerateDiff (byte[] data1, byte[] data2)
+		static string GenerateDiff (byte[] data1, byte[] data2)
 		{
 			if (RawText.IsBinary (data1) || RawText.IsBinary (data2)) {
 				if (data1.Length != data2.Length)
@@ -981,14 +1236,14 @@ namespace MonoDevelop.VersionControl.Git
 				string fileName = null;
 				
 				while ((line = sr.ReadLine ()) != null) {
-					if (line.StartsWith ("+++ ") || line.StartsWith ("--- ")) {
+					if (line.StartsWith ("+++ ", StringComparison.Ordinal) || line.StartsWith ("--- ", StringComparison.Ordinal)) {
 						string newFile = RootPath.Combine (line.Substring (6));
 						if (fileName != null && fileName != newFile) {
 							list.Add (new DiffInfo (basePath, fileName, content.ToString ().Trim ('\n')));
 							content = new StringBuilder ();
 						}
 						fileName = newFile;
-					} else if (!line.StartsWith ("diff") && !line.StartsWith ("index")) {
+					} else if (!line.StartsWith ("diff", StringComparison.Ordinal) && !line.StartsWith ("index", StringComparison.Ordinal)) {
 						content.Append (line).Append ('\n');
 					}
 				}
@@ -1007,8 +1262,8 @@ namespace MonoDevelop.VersionControl.Git
 			
 			if (remotes.Contains ("origin"))
 				return "origin";
-			else
-				return remotes[0];
+
+			return remotes[0];
 		}
 
 		public void Push (IProgressMonitor monitor, string remote, string remoteBranch)
@@ -1161,7 +1416,7 @@ namespace MonoDevelop.VersionControl.Git
 			var refs = RootRepository.RefDatabase.GetRefs (Constants.R_REMOTES);
 			foreach (var pair in refs) {
 				string name = NGit.Repository.ShortenRefName (pair.Key);
-				if (name.StartsWith (remoteName + "/"))
+				if (name.StartsWith (remoteName + "/", StringComparison.Ordinal))
 					yield return name.Substring (remoteName.Length + 1);
 			}
 		}
@@ -1255,8 +1510,8 @@ namespace MonoDevelop.VersionControl.Git
 			var modified = changes.Where (c => c.GetChangeType () != DiffEntry.ChangeType.ADD).Select (c => GetRepository (c.GetNewPath ()).FromGitPath (c.GetNewPath ())).ToList ();
 			
 			monitor.BeginTask (GettextCatalog.GetString ("Updating solution"), removed.Count + modified.Count);
-			
-			FileService.NotifyFilesChanged (modified);
+
+			FileService.NotifyFilesChanged (modified, true);
 			monitor.Step (modified.Count);
 			
 			FileService.NotifyFilesRemoved (removed);
@@ -1272,17 +1527,17 @@ namespace MonoDevelop.VersionControl.Git
 		
 		public static string GetStashBranchName (string stashName)
 		{
-			if (stashName.StartsWith ("__MD_"))
+			if (stashName.StartsWith ("__MD_", StringComparison.Ordinal))
 				return stashName.Substring (5);
-			else
-				return null;
+
+			return null;
 		}
 
-		Stash GetStashForBranch (StashCollection stashes, string branchName)
+		static Stash GetStashForBranch (StashCollection stashes, string branchName)
 		{
 			string sn = GetStashName (branchName);
 			foreach (Stash ss in stashes) {
-				if (ss.Comment.IndexOf (sn) != -1)
+				if (ss.Comment.IndexOf (sn, StringComparison.InvariantCulture) != -1)
 					return ss;
 			}
 			return null;
@@ -1389,11 +1644,12 @@ namespace MonoDevelop.VersionControl.Git
 				var commit = result.GetSourceCommit (i);
 				var author = result.GetSourceAuthor (i);
 				if (commit != null && author != null) {
-					string name = string.Format ("{0} <{1}>", author.GetName (), author.GetEmailAddress ());
 					var commitTime = new DateTime (1970, 1, 1).AddSeconds (commit.CommitTime);
-					list.Add (new Annotation (commit.Name, name, commitTime));
+					string authorName = author.GetName () ?? commit.GetAuthorIdent ().GetName ();
+					string email = author.GetEmailAddress () ?? commit.GetAuthorIdent ().GetEmailAddress ();
+					list.Add (new Annotation (commit.Name, authorName, commitTime, String.Format ("<{0}>", email)));
 				} else {
-					list.Add (new Annotation (new string ('0', 20), "<uncommitted>", DateTime.Now));
+					list.Add (new Annotation (GettextCatalog.GetString ("working copy"), "<uncommitted>", DateTime.Now));
 				}
 			}
 			return list.ToArray ();
@@ -1405,6 +1661,46 @@ namespace MonoDevelop.VersionControl.Git
 			if (id == null)
 				return null;
 			return new GitRevision (this, revision.GitRepository, id.Name);
+		}
+
+		protected override void OnIgnore (FilePath[] paths)
+		{
+			List<FilePath> ignored = new List<FilePath> ();
+			string gitignore = RootPath + Path.DirectorySeparatorChar + ".gitignore";
+			string txt;
+			if (File.Exists (gitignore)) {
+				using (StreamReader br = new StreamReader (gitignore)) {
+					while ((txt = br.ReadLine ()) != null) {
+						ignored.Add (txt);
+					}
+				}
+			}
+
+			StringBuilder sb = new StringBuilder ();
+			foreach (var path in paths.Except (ignored))
+				sb.AppendLine (RootRepository.ToGitPath (path));
+
+			File.AppendAllText (RootPath + Path.DirectorySeparatorChar + ".gitignore", sb.ToString ());
+		}
+
+		protected override void OnUnignore (FilePath[] paths)
+		{
+			List<string> ignored = new List<string> ();
+			string gitignore = RootPath + Path.DirectorySeparatorChar + ".gitignore";
+			string txt;
+			if (File.Exists (gitignore)) {
+				using (StreamReader br = new StreamReader (RootPath + Path.DirectorySeparatorChar + ".gitignore")) {
+					while ((txt = br.ReadLine ()) != null) {
+						ignored.Add (txt);
+					}
+				}
+			}
+
+			StringBuilder sb = new StringBuilder ();
+			foreach (var path in ignored.Except (RootRepository.ToGitPath (paths)))
+				sb.AppendLine (path);
+
+			File.WriteAllText (RootPath + Path.DirectorySeparatorChar + ".gitignore", sb.ToString ());
 		}
 	}
 	
