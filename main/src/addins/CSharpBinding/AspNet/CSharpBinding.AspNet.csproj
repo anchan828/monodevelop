@@ -19,14 +19,19 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <ConsolePause>False</ConsolePause>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\..\build\AddIns\BackendBindings\MonoDevelop.CSharpBinding.AspNet.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>none</DebugType>
+    <DebugType>pdbonly</DebugType>
     <Optimize>False</Optimize>
     <OutputPath>..\..\..\..\build\AddIns\BackendBindings\</OutputPath>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <ConsolePause>False</ConsolePause>
+    <DebugSymbols>true</DebugSymbols>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\..\build\AddIns\BackendBindings\MonoDevelop.CSharpBinding.AspNet.xml</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -40,6 +45,7 @@
   <ItemGroup>
     <Compile Include="AspLanguageBuilder.cs" />
     <Compile Include="ASPNetReferenceFinder.cs" />
+    <Compile Include="AddinInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\AspNet\MonoDevelop.AspNet\MonoDevelop.AspNet.csproj">
@@ -77,11 +83,6 @@
       <Name>MonoDevelop.Refactoring</Name>
       <Private>False</Private>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\..\contrib\NRefactory\Project\NRefactory.csproj">
-      <Project>{3A9AE6AA-BC07-4A2F-972C-581E3AE2F195}</Project>
-      <Name>NRefactory</Name>
-      <Private>False</Private>
-    </ProjectReference>
     <ProjectReference Include="..\..\..\..\external\nrefactory\ICSharpCode.NRefactory\ICSharpCode.NRefactory.csproj">
       <Project>{3B2A5653-EC97-4001-BB9B-D90F1AF2C371}</Project>
       <Name>ICSharpCode.NRefactory</Name>
@@ -112,11 +113,21 @@
       <Name>MonoDevelop.Debugger</Name>
       <Private>False</Private>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\core\Mono.Debugging\Mono.Debugging.csproj">
+    <ProjectReference Include="..\..\..\..\external\debugger-libs\Mono.Debugging\Mono.Debugging.csproj">
       <Project>{90C99ADB-7D4B-4EB4-98C2-40BD1B14C7D2}</Project>
       <Name>Mono.Debugging</Name>
       <Private>False</Private>
     </ProjectReference>
+    <ProjectReference Include="..\..\..\..\external\mono-addins\Mono.Addins\Mono.Addins.csproj">
+      <Project>{91DD5A2D-9FE3-4C3C-9253-876141874DAD}</Project>
+      <Name>Mono.Addins</Name>
+      <Private>False</Private>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
+  <ItemGroup>
+    <EmbeddedResource Include="ExtensionModel.addin.xml">
+      <LogicalName>ExtensionModel.addin.xml</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

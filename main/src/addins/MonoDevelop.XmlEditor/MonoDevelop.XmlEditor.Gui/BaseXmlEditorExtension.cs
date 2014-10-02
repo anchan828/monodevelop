@@ -203,7 +203,7 @@ namespace MonoDevelop.XmlEditor.Gui
 			int triggerWordLength = 0;
 			
 			tracker.UpdateEngine ();
-			return HandleCodeCompletion ((CodeCompletionContext) completionContext, true, ref triggerWordLength);
+			return HandleCodeCompletion (completionContext, true, ref triggerWordLength);
 		}
 
 		public override ICompletionDataList HandleCodeCompletion (
@@ -213,8 +213,7 @@ namespace MonoDevelop.XmlEditor.Gui
 			char ch = CompletionWidget != null ? CompletionWidget.GetChar (pos - 1) : Editor.GetCharAt (pos - 1);
 			if (pos > 0 && ch == completionChar) {
 				tracker.UpdateEngine ();
-				return HandleCodeCompletion ((CodeCompletionContext) completionContext, 
-				                             false, ref triggerWordLength);
+				return HandleCodeCompletion (completionContext, false, ref triggerWordLength);
 			}
 			return null;
 		}
@@ -318,18 +317,17 @@ namespace MonoDevelop.XmlEditor.Gui
 			
 			//attribute value completion
 			//determine whether to trigger completion within attribute values quotes
-			if ((Tracker.Engine.CurrentState is XmlDoubleQuotedAttributeValueState
-			    || Tracker.Engine.CurrentState is XmlSingleQuotedAttributeValueState)
+			if ((Tracker.Engine.CurrentState is XmlAttributeValueState)
 			    //trigger on the opening quote
-			    && (Tracker.Engine.CurrentStateLength == 0
+			    && ((Tracker.Engine.CurrentStateLength == 1 && (currentChar == '\'' || currentChar == '"'))
 			        //or trigger on first letter of value, if unforced
 			        || (!forced && Tracker.Engine.CurrentStateLength == 1))
 			    )
 			{
-				XAttribute att = (XAttribute) Tracker.Engine.Nodes.Peek ();
+				var att = (XAttribute) Tracker.Engine.Nodes.Peek ();
 				
 				if (att.IsNamed) {
-					IAttributedXObject attributedOb = Tracker.Engine.Nodes.Peek (1) as IAttributedXObject;
+					var attributedOb = Tracker.Engine.Nodes.Peek (1) as IAttributedXObject;
 					if (attributedOb == null)
 						return null;
 					
@@ -337,13 +335,13 @@ namespace MonoDevelop.XmlEditor.Gui
 					if (completionContext.TriggerOffset < buf.Length)
 						next = buf.GetCharAt (completionContext.TriggerOffset);
 					
-					char compareChar = (Tracker.Engine.CurrentStateLength == 0)? currentChar : previousChar;
+					char compareChar = (Tracker.Engine.CurrentStateLength == 1)? currentChar : previousChar;
 					
 					if ((compareChar == '"' || compareChar == '\'') 
 					    && (next == compareChar || char.IsWhiteSpace (next))
 					) {
 						//if triggered by first letter of value, grab that letter
-						if (Tracker.Engine.CurrentStateLength == 1)
+						if (Tracker.Engine.CurrentStateLength == 2)
 							triggerWordLength = 1;
 						
 						return GetAttributeValueCompletions (attributedOb, att);
@@ -447,7 +445,7 @@ namespace MonoDevelop.XmlEditor.Gui
 		
 		static int GetElementIndentDepth (NodeStack nodes)
 		{
-			return nodes.OfType<XElement> ().Where (el => !el.IsClosed).Count ();
+			return nodes.OfType<XElement> ().Count (el => !el.IsClosed);
 		}
 		
 		static int GetAttributeIndentDepth (NodeStack nodes)

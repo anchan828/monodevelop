@@ -29,18 +29,13 @@
 //
 
 using System;
-using System.Threading;
 using System.IO;
-using System.Xml;
-using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
-using MonoDevelop.Core.Execution;
 using MonoDevelop.Core.AddIns;
-using MonoDevelop.Core.Serialization;
 using Mono.Addins;
-using Mono.Cecil;
+using System.Reflection;
+using System.Linq;
 
 namespace MonoDevelop.Core.Assemblies
 {
@@ -72,34 +67,49 @@ namespace MonoDevelop.Core.Assemblies
 			
 			// Don't initialize until Current and Default Runtimes are set
 			foreach (TargetRuntime runtime in runtimes) {
-				InitializeRuntime (runtime);
+				runtime.Initialized += HandleRuntimeInitialized;
 			}
-			
+
 			if (CurrentRuntime == null)
 				LoggingService.LogFatalError ("Could not create runtime info for current runtime");
+
+			CurrentRuntime.StartInitialization ();
 			
 			LoadUserAssemblyContext ();
 			userAssemblyContext.Changed += delegate {
 				SaveUserAssemblyContext ();
 			};
 		}
-		
+
 		void InitializeRuntime (TargetRuntime runtime)
 		{
 			runtime.Initialized += HandleRuntimeInitialized;
 			runtime.StartInitialization ();
 		}
-		
+
 		void HandleRuntimeInitialized (object sender, EventArgs e)
 		{
 			var runtime = (TargetRuntime) sender;
-			runtime.Initialized -= HandleRuntimeInitialized;
+			if (runtime.CustomFrameworks.Any ())
+				UpdateFrameworks (runtime.CustomFrameworks);
+		}
+
+		//this MUST be used when mutating `frameworks` after Initialize ()
+		void UpdateFrameworks (IEnumerable<TargetFramework> toAdd)
+		{
 			lock (frameworkWriteLock) {
 				var newFxList = new Dictionary<TargetFrameworkMoniker,TargetFramework> (frameworks);
-				foreach (var fx in runtime.CustomFrameworks) {
-					if (!newFxList.ContainsKey (fx.Id))
-						newFxList[fx.Id] = fx;
+				bool changed = false;
+				foreach (var fx in toAdd) {
+					TargetFramework existing;
+					//TODO: can we update dummies w/real frameworks if later-added runtime has definitions?
+					if (!newFxList.TryGetValue (fx.Id, out existing) || existing.Assemblies.Length == 0) {
+						newFxList [fx.Id] = fx;
+						changed = true;
+					}
 				}
+				if (!changed)
+					return;
 				BuildFrameworkRelations (newFxList);
 				frameworks = newFxList;
 			}
@@ -126,7 +136,7 @@ namespace MonoDevelop.Core.Assemblies
 		
 		public void RegisterRuntime (TargetRuntime runtime)
 		{
-			InitializeRuntime (runtime);
+			runtime.Initialized += HandleRuntimeInitialized;
 			runtimes.Add (runtime);
 			if (RuntimesChanged != null)
 				RuntimesChanged (this, EventArgs.Empty);
@@ -138,25 +148,23 @@ namespace MonoDevelop.Core.Assemblies
 				return;
 			DefaultRuntime = CurrentRuntime;
 			runtimes.Remove (runtime);
+			runtime.Initialized -= HandleRuntimeInitialized;
 			if (RuntimesChanged != null)
 				RuntimesChanged (this, EventArgs.Empty);
 		}
 		
-		internal IEnumerable<TargetFramework> GetCoreFrameworks ()
+		internal IEnumerable<TargetFramework> GetKnownFrameworks ()
 		{
-			foreach (var id in coreFrameworks)
-				yield return frameworks[id];
+			return frameworks.Values;
 		}
-		
-		void EnsureRuntimesInitialized ()
+
+		internal bool IsKnownFramework (TargetFrameworkMoniker moniker)
 		{
-			foreach (var r in runtimes)
-				r.EnsureInitialized ();
+			return frameworks.ContainsKey (moniker);
 		}
 		
 		public IEnumerable<TargetFramework> GetTargetFrameworks ()
 		{
-			EnsureRuntimesInitialized ();
 			return frameworks.Values;
 		}
 		
@@ -184,25 +192,12 @@ namespace MonoDevelop.Core.Assemblies
 		
 		public TargetFramework GetTargetFramework (TargetFrameworkMoniker id)
 		{
-			EnsureRuntimesInitialized ();
-			return GetTargetFramework (id, frameworks);
-		}
-		
-		//HACK: this is so that MonoTargetRuntime can access the core frameworks while it's doing its broken assembly->framework mapping
-		internal TargetFramework GetCoreFramework (TargetFrameworkMoniker id)
-		{
-			return GetTargetFramework (id, frameworks);
-		}
-		
-		static TargetFramework GetTargetFramework (TargetFrameworkMoniker id, Dictionary<TargetFrameworkMoniker, TargetFramework> frameworks)
-		{
 			TargetFramework fx;
 			if (frameworks.TryGetValue (id, out fx))
 				return fx;
 			LoggingService.LogWarning ("Unregistered TargetFramework '{0}' is being requested from SystemAssemblyService", id);
-			fx = new TargetFramework (id);
-			frameworks[id] = fx;
-			return fx;
+			UpdateFrameworks (new [] { new TargetFramework (id) });
+			return frameworks [id];
 		}
 		
 		public SystemPackage GetPackageFromPath (string assemblyPath)
@@ -217,7 +212,7 @@ namespace MonoDevelop.Core.Assemblies
 
 		public static AssemblyName ParseAssemblyName (string fullname)
 		{
-			AssemblyName aname = new AssemblyName ();
+			var aname = new AssemblyName ();
 			int i = fullname.IndexOf (',');
 			if (i == -1) {
 				aname.Name = fullname.Trim ();
@@ -225,7 +220,7 @@ namespace MonoDevelop.Core.Assemblies
 			}
 			
 			aname.Name = fullname.Substring (0, i).Trim ();
-			i = fullname.IndexOf ("Version", i+1);
+			i = fullname.IndexOf ("Version", i + 1, StringComparison.Ordinal);
 			if (i == -1)
 				return aname;
 			i = fullname.IndexOf ('=', i);
@@ -239,34 +234,31 @@ namespace MonoDevelop.Core.Assemblies
 			return aname;
 		}
 		
-		static Dictionary<string, AssemblyName> assemblyNameCache = new Dictionary<string, AssemblyName> ();
-		internal static System.Reflection.AssemblyName GetAssemblyNameObj (string file)
+		static readonly Dictionary<string, AssemblyName> assemblyNameCache = new Dictionary<string, AssemblyName> ();
+		internal static AssemblyName GetAssemblyNameObj (string file)
 		{
+			AssemblyName name;
+
 			lock (assemblyNameCache) {
-				AssemblyName name;
 				if (assemblyNameCache.TryGetValue (file, out name))
 					return name;
-				
-				try {
-					/*
-					// Don't use reflection to get the name since it is a common cause for deadlocks
-					// in Mono < 2.6.
-					AssemblyDefinition asm = AssemblyDefinition.ReadAssembly (file);
-					assemblyNameCache [file] = new AssemblyName (asm.Name.FullName);
-					return assemblyNameCache [file];
-					*/
-					assemblyNameCache [file] = System.Reflection.AssemblyName.GetAssemblyName (file);
-					return assemblyNameCache [file];
-				} catch (FileNotFoundException) {
-					// GetAssemblyName is not case insensitive in mono/windows. This is a workaround
-					foreach (string f in Directory.GetFiles (Path.GetDirectoryName (file), Path.GetFileName (file))) {
-						if (f != file) {
-							assemblyNameCache [file] = GetAssemblyNameObj (f);
-							return assemblyNameCache [file];
-						}
-					}
-					throw;
+			}
+
+			try {
+				name = AssemblyName.GetAssemblyName (file);
+				lock (assemblyNameCache) {
+					assemblyNameCache [file] = name;
 				}
+				return name;
+			} catch (FileNotFoundException) {
+				// GetAssemblyName is not case insensitive in mono/windows. This is a workaround
+				foreach (string f in Directory.GetFiles (Path.GetDirectoryName (file), Path.GetFileName (file))) {
+					if (f != file) {
+						GetAssemblyNameObj (f);
+						return assemblyNameCache [file];
+					}
+				}
+				throw;
 			}
 		}
 		
@@ -295,7 +287,8 @@ namespace MonoDevelop.Core.Assemblies
 			
 			BuildFrameworkRelations (frameworks);
 		}
-		
+
+		//warning: this may mutate `frameworks` and any newly-added TargetFrameworks in it
 		static void BuildFrameworkRelations (Dictionary<TargetFrameworkMoniker, TargetFramework> frameworks)
 		{
 			foreach (TargetFramework fx in frameworks.Values)
@@ -310,27 +303,59 @@ namespace MonoDevelop.Core.Assemblies
 			var includesFramework = fx.GetIncludesFramework ();
 			if (includesFramework != null) {
 				fx.IncludedFrameworks.Add (includesFramework);
-				TargetFramework compatFx = GetTargetFramework (includesFramework, frameworks);
-				BuildFrameworkRelations (compatFx, frameworks);
-				fx.IncludedFrameworks.AddRange (compatFx.IncludedFrameworks);
+				TargetFramework compatFx;
+				if (frameworks.TryGetValue (includesFramework, out compatFx)) {
+					BuildFrameworkRelations (compatFx, frameworks);
+					fx.IncludedFrameworks.AddRange (compatFx.IncludedFrameworks);
+				} else {
+					// the framework is broken, can't depend on an unknown framework
+					LoggingService.LogWarning ("TargetFramework '{0}' imports unknown framework '{0}'", fx.Id, includesFramework);
+				}
 			}
 			
 			fx.RelationsBuilt = true;
 		}
+
+		public static IKVM.Reflection.Universe CreateClosedUniverse ()
+		{
+			const IKVM.Reflection.UniverseOptions ikvmOptions =
+				IKVM.Reflection.UniverseOptions.DisablePseudoCustomAttributeRetrieval |
+				IKVM.Reflection.UniverseOptions.SupressReferenceTypeIdentityConversion |
+				IKVM.Reflection.UniverseOptions.ResolveMissingMembers;
+
+			var universe = new IKVM.Reflection.Universe (ikvmOptions);
+			universe.AssemblyResolve += delegate (object sender, IKVM.Reflection.ResolveEventArgs args) {
+				return ((IKVM.Reflection.Universe)sender).CreateMissingAssembly (args.Name);
+			};
+			return universe;
+		}
 		
-		//FIXME: this is totally broken. assemblies can't just belong to one framework
-		// also, it currently only resolves assemblies against the core frameworks
+		//FIXME: the fallback is broken since multiple frameworks can have the same corlib
 		public TargetFrameworkMoniker GetTargetFrameworkForAssembly (TargetRuntime tr, string file)
 		{
+			var universe = CreateClosedUniverse ();
 			try {
-				AssemblyDefinition asm = AssemblyDefinition.ReadAssembly (file);
+				IKVM.Reflection.Assembly assembly = universe.LoadFile (file);
+				var att = assembly.CustomAttributes.FirstOrDefault (a =>
+					a.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute"
+				);
+				if (att != null) {
+					if (att.ConstructorArguments.Count == 1) {
+						var v = att.ConstructorArguments[0].Value as string;
+						TargetFrameworkMoniker m;
+						if (v != null && TargetFrameworkMoniker.TryParse (v, out m)) {
+							return m;
+						}
+					}
+					LoggingService.LogError ("Invalid TargetFrameworkAttribute in assembly {0}", file);
+				}
 
-				foreach (AssemblyNameReference aname in asm.MainModule.AssemblyReferences) {
-					if (aname.Name == "mscorlib") {
+				foreach (var r in assembly.GetReferencedAssemblies ()) {
+					if (r.Name == "mscorlib") {
 						TargetFramework compatibleFramework = null;
 						// If there are several frameworks that can run the file, pick one that is installed
-						foreach (TargetFramework tf in GetCoreFrameworks ()) {
-							if (tf.GetCorlibVersion () == aname.Version.ToString ()) {
+						foreach (TargetFramework tf in GetKnownFrameworks ()) {
+							if (tf.GetCorlibVersion () == r.Version.ToString ()) {
 								compatibleFramework = tf;
 								if (tr.IsInstalled (tf))
 									return tf.Id;
@@ -341,9 +366,13 @@ namespace MonoDevelop.Core.Assemblies
 						break;
 					}
 				}
-			} catch {
-				// Ignore
+			} catch (Exception ex) {
+				LoggingService.LogError ("Error determining target framework for assembly {0}: {1}", file, ex);
+				return TargetFrameworkMoniker.UNKNOWN;
+			} finally {
+				universe.Dispose ();
 			}
+			LoggingService.LogError ("Failed to determine target framework for assembly {0}", file);
 			return TargetFrameworkMoniker.UNKNOWN;
 		}
 		
@@ -377,18 +406,24 @@ namespace MonoDevelop.Core.Assemblies
 					yield return r.Name;
 				}
 			}
+		}
 
-			/* CECIL version:
-
-			Mono.Cecil.AssemblyDefinition adef;
-			try {
-				adef = Mono.Cecil.AssemblyDefinition.ReadAssembly (fileName);
-			} catch {
-				yield break;
+		public static bool ContainsReferenceToSystemRuntime (string fileName)
+		{
+			using (var universe = new IKVM.Reflection.Universe ()) {
+				IKVM.Reflection.Assembly assembly;
+				try {
+					assembly = universe.LoadFile (fileName);
+				} catch {
+					return false;
+				}
+				foreach (var r in assembly.GetReferencedAssemblies ()) {
+					if (r.FullName.Equals ("System.Runtime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"))
+						return true;
+				}
 			}
-			foreach (Mono.Cecil.AssemblyNameReference aref in adef.MainModule.AssemblyReferences) {
-				yield return aref.Name;
-			}*/
+
+			return false;
 		}
 
 		public class ManifestResource
@@ -427,17 +462,6 @@ namespace MonoDevelop.Core.Assemblies
 					yield return new ManifestResource (r, () => assembly.GetManifestResourceStream (r));
 				}
 			}
-
-			/* CECIL version:
-
-		Mono.Cecil.AssemblyDefinition a = Mono.Cecil.AssemblyDefinition.ReadAssembly (asmInBundle);
-			foreach (Mono.Cecil.ModuleDefinition m in a.Modules) {
-				for (int i = 0; i < m.Resources.Count; i++) {
-					var er = m.Resources[i] as Mono.Cecil.EmbeddedResource;
-					
-					yield return new ManifestResource (er.Name, () => er.GetResourceStream ().ReadToEnd ());
-				}
-			}*/
 		}
 
 	}

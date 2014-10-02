@@ -9,50 +9,19 @@ namespace MonoDevelop.VersionControl
 {
 	class CommitCommand
 	{
-		public static bool Commit (VersionControlItemList items, bool test)
-		{
-			if (items.Count != 1)
-				return false;
-
-			VersionControlItem item = items [0];
-			if (item.VersionInfo.CanCommit) {
-				if (test) return true;
-				ChangeSet cset  = item.Repository.CreateChangeSet (item.Path);
-				cset.GlobalComment = VersionControlService.GetCommitComment (cset.BaseLocalPath);
-				
-				foreach (VersionInfo vi in item.Repository.GetDirectoryVersionInfo (item.Path, false, true))
-					if (vi.HasLocalChanges)
-						cset.AddFile (vi);
-				if (!cset.IsEmpty) {
-					Commit (item.Repository, cset, false);
-				} else {
-					MessageService.ShowMessage (GettextCatalog.GetString ("There are no changes to be committed."));
-					return false;
-				}
-			}
-			return false;
-		}
-		
-		public static bool Commit (Repository vc, ChangeSet changeSet, bool test)
+		public static void Commit (Repository vc, ChangeSet changeSet)
 		{
 			try {
-				if (changeSet.IsEmpty) {
-					if (!test)
-						MessageService.ShowMessage (GettextCatalog.GetString ("There are no changes to be committed."));
-					return false;
-				}
-				
 				if (vc.GetVersionInfo (changeSet.BaseLocalPath).CanCommit) {
-					if (test) return true;
-
 					if (!VersionControlService.NotifyPrepareCommit (vc, changeSet))
-						return false;
+						return;
+
 					CommitDialog dlg = new CommitDialog (changeSet);
 					try {
 						if (MessageService.RunCustomDialog (dlg) == (int) Gtk.ResponseType.Ok) {
 							if (VersionControlService.NotifyBeforeCommit (vc, changeSet)) {
 								new CommitWorker (vc, changeSet, dlg).Start();
-								return true;
+								return;
 							}
 						}
 						dlg.EndCommit (false);
@@ -61,14 +30,9 @@ namespace MonoDevelop.VersionControl
 					}
 					VersionControlService.NotifyAfterCommit (vc, changeSet, false);
 				}
-				return false;
 			}
 			catch (Exception ex) {
-				if (test)
-					LoggingService.LogError (ex.ToString ());
-				else
 					MessageService.ShowException (ex, GettextCatalog.GetString ("Version control command failed."));
-				return false;
 			}
 		}
 

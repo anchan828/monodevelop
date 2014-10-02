@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using System.Collections;
 using System.Runtime.InteropServices;
@@ -10,6 +11,9 @@ namespace Stetic {
 	public static class GladeUtils {
 
 		public const string Glade20SystemId = "http://glade.gnome.org/glade-2.0.dtd";
+		const string LIBGOBJ = "libgobject-2.0-0.dll";
+		const string LIBGLIBGLUE = "glibsharpglue-2";
+		const string LIBGTK = "libgtk-win32-2.0-0.dll";
 
 		static Gdk.Atom gladeAtom;
 		public static Gdk.Atom ApplicationXGladeAtom {
@@ -28,7 +32,11 @@ namespace Stetic {
 			    doctype.SystemId != Glade20SystemId)
 				throw new GladeException ("Not a glade file according to doctype");
 */
-			XmlReader reader = Registry.GladeImportXsl.Transform (doc, null, (XmlResolver)null);
+
+			StringWriter sw = new StringWriter ();
+			XmlWriter xw = XmlWriter.Create (sw);
+			Registry.GladeImportXsl.Transform (doc, xw);
+			XmlReader reader = XmlReader.Create (sw.ToString ());
 			doc = new XmlDocument ();
 			doc.PreserveWhitespace = true;
 			doc.Load (reader);
@@ -38,7 +46,10 @@ namespace Stetic {
 
 		public static XmlDocument XslExportTransform (XmlDocument doc)
 		{
-			XmlReader reader = Registry.GladeExportXsl.Transform (doc, null, (XmlResolver)null);
+			StringWriter sw = new StringWriter ();
+			XmlWriter xw = XmlWriter.Create (sw);
+			Registry.GladeExportXsl.Transform (doc, xw);
+			XmlReader reader = XmlReader.Create (sw.ToString ());
 			doc = new XmlDocument ();
 			doc.PreserveWhitespace = true;
 			doc.Load (reader);
@@ -741,40 +752,40 @@ namespace Stetic {
 			}
 		}
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_type_fundamental (IntPtr gtype);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_type_class_ref (IntPtr gtype);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_type_class_unref (IntPtr klass);
 
-		[DllImport ("glibsharpglue-2", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGLIBGLUE, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr gtksharp_object_newv (IntPtr gtype, int n_params, string[] names, GLib.Value[] vals);
 
-		[DllImport ("libgtk-win32-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGTK, CallingConvention = CallingConvention.Cdecl)]
 		static extern void gtk_object_sink (IntPtr raw);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern void g_object_get_property (IntPtr obj, string name, ref GLib.Value val);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern void g_object_set_property (IntPtr obj, string name, ref GLib.Value val);
 
-		[DllImport ("libgtk-win32-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGTK, CallingConvention = CallingConvention.Cdecl)]
 		static extern void gtk_container_child_get_property (IntPtr parent, IntPtr child, string name, ref GLib.Value val);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_enum_get_value_by_name (IntPtr enum_class, string name);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_enum_get_value (IntPtr enum_class, int val);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_flags_get_value_by_name (IntPtr flags_class, string nick);
 
-		[DllImport ("libgobject-2.0-0.dll", CallingConvention = CallingConvention.Cdecl)]
+		[DllImport (LIBGOBJ, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr g_flags_get_first_value (IntPtr flags_class, uint val);
 	}
 }

@@ -123,8 +123,14 @@ namespace MonoDevelop.CSharp
 			sb.AppendLine ();
 			
 			foreach (ProjectReference lib in projectItems.GetAll <ProjectReference> ()) {
-				if (lib.ReferenceType == ReferenceType.Project && !(lib.OwnerProject.ParentSolution.FindProjectByName (lib.Reference) is DotNetProject))
-					continue;
+				if (lib.ReferenceType == ReferenceType.Project) {
+					var ownerProject = lib.OwnerProject;
+					if (ownerProject != null) {
+						var parentSolution = ownerProject.ParentSolution;
+						if (parentSolution != null && !(parentSolution.FindProjectByName (lib.Reference) is DotNetProject))
+							continue;
+					}
+				} 
 				string refPrefix = string.IsNullOrEmpty (lib.Aliases) ? "" : lib.Aliases + "=";
 				foreach (string fileName in lib.GetReferencedFileNames (configSelector)) {
 					switch (lib.ReferenceType) {
@@ -160,13 +166,19 @@ namespace MonoDevelop.CSharp
 					}
 				}
 			}
-			
+
+			if (alreadyAddedReference.Any (reference => SystemAssemblyService.ContainsReferenceToSystemRuntime (reference))) {
+				LoggingService.LogInfo ("Found PCLv2 assembly.");
+				var facades = runtime.FindFacadeAssembliesForPCL (project.TargetFramework);
+				foreach (var facade in facades)
+					AppendQuoted (sb, "/r:", facade);
+			}
+
 			string sysCore = project.AssemblyContext.GetAssemblyFullName ("System.Core", project.TargetFramework);
-			if (sysCore != null) {
-				sysCore = project.AssemblyContext.GetAssemblyLocation (sysCore, project.TargetFramework);
-				if (sysCore != null && 
-					!alreadyAddedReference.Any (r => (r == sysCore || r.EndsWith ("System.Core.dll", StringComparison.OrdinalIgnoreCase))))
-					AppendQuoted (sb, "/r:", sysCore);
+			if (sysCore != null && !alreadyAddedReference.Contains (sysCore)) {
+				var asm = project.AssemblyContext.GetAssemblyFromFullName (sysCore, null, project.TargetFramework);
+				if (asm != null)
+					AppendQuoted (sb, "/r:", asm.Location);
 			}
 			
 			sb.AppendLine ("/nologo");
@@ -176,36 +188,31 @@ namespace MonoDevelop.CSharp
 			if (configuration.SignAssembly) {
 				if (File.Exists (configuration.AssemblyKeyFile))
 					AppendQuoted (sb, "/keyfile:", configuration.AssemblyKeyFile);
+				if (configuration.DelaySign)
+					sb.AppendLine ("/delaySign");
 			}
-			
-			if (configuration.DebugMode) {
-//				sb.AppendLine ("/debug:+");
-				sb.AppendLine ("/debug:full");
+
+			var debugType = compilerParameters.DebugType;
+			if (string.IsNullOrEmpty (debugType)) {
+				debugType = configuration.DebugMode ? "full" : "none";
+			} else if (string.Equals (debugType, "pdbonly", StringComparison.OrdinalIgnoreCase)) {
+				//old Mono compilers don't support pdbonly
+				if (monoRuntime != null && !monoRuntime.HasMultitargetingMcs)
+					debugType = "full";
 			}
-			
-			switch (compilerParameters.LangVersion) {
-			case LangVersion.Default:
-				break;
-			case LangVersion.ISO_1:
-				sb.AppendLine ("/langversion:ISO-1");
-				break;
-			case LangVersion.ISO_2:
-				sb.AppendLine ("/langversion:ISO-2");
-				break;
-			case LangVersion.Version3:
-				sb.AppendLine ("/langversion:3");
-				break;
-			case LangVersion.Version4:
-				sb.AppendLine ("/langversion:4");
-				break;
-			case LangVersion.Version5:
-				sb.AppendLine ("/langversion:5");
-				break;
-			default:
-				string message = "Invalid LangVersion enum value '" + compilerParameters.LangVersion.ToString () + "'";
-				monitor.ReportError (message, null);
-				LoggingService.LogError (message);
-				return null;
+			if (!string.Equals (debugType, "none", StringComparison.OrdinalIgnoreCase)) {
+					sb.AppendLine ("/debug:" + debugType);
+			}
+
+			if (compilerParameters.LangVersion != LangVersion.Default) {
+				var langVersionString = CSharpCompilerParameters.TryLangVersionToString (compilerParameters.LangVersion);
+				if (langVersionString == null) {
+					string message = "Invalid LangVersion enum value '" + compilerParameters.LangVersion.ToString () + "'";
+					monitor.ReportError (message, null);
+					LoggingService.LogError (message);
+					return null;
+				}
+				sb.AppendLine ("/langversion:" + langVersionString);
 			}
 			
 			// mcs default is + but others might not be
@@ -293,7 +300,7 @@ namespace MonoDevelop.CSharp
 						break;
 					case "EmbeddedResource":
 						string fname = finfo.Name;
-						if (string.Compare (Path.GetExtension (fname), ".resx", true) == 0)
+						if (string.Compare (Path.GetExtension (fname), ".resx", StringComparison.OrdinalIgnoreCase) == 0)
 							fname = Path.ChangeExtension (fname, ".resources");
 						sb.Append ('"');sb.Append ("/res:");
 						sb.Append (fname);sb.Append (',');sb.Append (finfo.ResourceId);
@@ -303,11 +310,8 @@ namespace MonoDevelop.CSharp
 						continue;
 				}
 			}
-			if (compilerParameters.GenerateXmlDocumentation) 
-				AppendQuoted (sb, "/doc:", Path.ChangeExtension (outputName, ".xml"));
-			
-			if (!string.IsNullOrEmpty (compilerParameters.AdditionalArguments)) 
-				sb.AppendLine (compilerParameters.AdditionalArguments);
+			if (!compilerParameters.DocumentationFile.IsNullOrEmpty) 
+				AppendQuoted (sb, "/doc:", compilerParameters.DocumentationFile);
 			
 			if (!string.IsNullOrEmpty (compilerParameters.NoWarnings)) 
 				AppendQuoted (sb, "/nowarn:", compilerParameters.NoWarnings);
@@ -321,30 +325,23 @@ namespace MonoDevelop.CSharp
 			string error  = "";
 			
 			File.WriteAllText (responseFileName, sb.ToString ());
-			
 
-			
 			monitor.Log.WriteLine (compilerName + " /noconfig " + sb.ToString ().Replace ('\n',' '));
-			
-			string workingDir = ".";
-			if (configuration.ParentItem != null) {
-				workingDir = configuration.ParentItem.BaseDirectory;
-				if (workingDir == null)
-					// Dummy projects created for single files have no filename
-					// and so no BaseDirectory.
-					// This is a workaround for a bug in 
-					// ProcessStartInfo.WorkingDirectory - not able to handle null
-					workingDir = ".";
-			}
 
-			LoggingService.LogInfo (compilerName + " " + sb.ToString ());
-			
+			// Dummy projects created for single files have no filename
+			// and so no BaseDirectory.
+			string workingDir = null;
+			if (configuration.ParentItem != null)
+				workingDir = configuration.ParentItem.BaseDirectory;
+
+			LoggingService.LogInfo (compilerName + " " + sb);
+
 			ExecutionEnvironment envVars = runtime.GetToolsExecutionEnvironment (project.TargetFramework);
 			string cargs = "/noconfig @\"" + responseFileName + "\"";
 
 			int exitCode = DoCompilation (monitor, compilerName, cargs, workingDir, envVars, gacRoots, ref output, ref error);
 			
-			BuildResult result = ParseOutput (output, error);
+			BuildResult result = ParseOutput (workingDir, output, error);
 			if (result.CompilerOutput.Trim ().Length != 0)
 				monitor.Log.WriteLine (result.CompilerOutput);
 			
@@ -377,7 +374,7 @@ namespace MonoDevelop.CSharp
 			}
 		}
 		
-		static BuildResult ParseOutput (string stdout, string stderr)
+		static BuildResult ParseOutput (string basePath, string stdout, string stderr)
 		{
 			BuildResult result = new BuildResult ();
 			
@@ -400,13 +397,13 @@ namespace MonoDevelop.CSharp
 					if (curLine.Length == 0) 
 						continue;
 					
-					if (curLine.StartsWith ("Unhandled Exception: System.TypeLoadException") || 
-					    curLine.StartsWith ("Unhandled Exception: System.IO.FileNotFoundException")) {
+					if (curLine.StartsWith ("Unhandled Exception: System.TypeLoadException", StringComparison.Ordinal) ||
+					    curLine.StartsWith ("Unhandled Exception: System.IO.FileNotFoundException", StringComparison.Ordinal)) {
 						result.ClearErrors ();
 						typeLoadException = true;
 					}
 					
-					BuildError error = CreateErrorFromString (curLine);
+					BuildError error = CreateErrorFromString (basePath, curLine);
 					
 					if (error != null)
 						result.Append (error);
@@ -435,7 +432,9 @@ namespace MonoDevelop.CSharp
 			ProcessStartInfo pinfo = new ProcessStartInfo (compilerName, compilerArgs);
 			pinfo.StandardErrorEncoding = Encoding.UTF8;
 			pinfo.StandardOutputEncoding = Encoding.UTF8;
-			pinfo.WorkingDirectory = working_dir;
+
+			// The "." is a workaround for a bug in ProcessStartInfo.WorkingDirectory - not able to handle null
+			pinfo.WorkingDirectory = working_dir ?? ".";
 			
 			if (gacRoots.Count > 0) {
 				// Create the gac prefix string
@@ -467,7 +466,7 @@ namespace MonoDevelop.CSharp
 		// Snatched from our codedom code, with some changes to make it compatible with csc
 		// (the line+column group is optional is csc)
 		static Regex regexError = new Regex (@"^(\s*(?<file>.+[^)])(\((?<line>\d*)(,(?<column>\d*[\+]*))?\))?:\s+)*(?<level>\w+)\s+(?<number>..\d+):\s*(?<message>.*)", RegexOptions.Compiled | RegexOptions.ExplicitCapture);
-		static BuildError CreateErrorFromString (string error_string)
+		static BuildError CreateErrorFromString (string basePath, string error_string)
 		{
 			// When IncludeDebugInformation is true, prevents the debug symbols stats from braeking this.
 			if (error_string.StartsWith ("WROTE SYMFILE") ||
@@ -481,7 +480,14 @@ namespace MonoDevelop.CSharp
 				return null;
 			
 			BuildError error = new BuildError ();
-			error.FileName = match.Result ("${file}") ?? "";
+			FilePath filename = match.Result ("${file}");
+			if (filename.IsNullOrEmpty) {
+				filename = FilePath.Empty;
+			} else if (!filename.IsAbsolute && basePath != null) {
+				filename = filename.ToAbsolute (basePath);
+			}
+			error.FileName = filename;
+
 			
 			string line = match.Result ("${line}");
 			error.Line = !string.IsNullOrEmpty (line) ? Int32.Parse (line) : 0;

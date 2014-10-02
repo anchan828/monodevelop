@@ -75,10 +75,15 @@ namespace MonoDevelop.AspNet
 			foreach (string s in dirs)
 				fullPaths.Add (proj.BaseDirectory.Combine (s));
 			RemoveDirsNotInProject (fullPaths, proj);
-			
+
+			if (fullPaths.Count == 0)
+				return;
+
 			foreach (string dir in dirs) {
+				if (!fullPaths.Contains (proj.BaseDirectory.Combine (dir)))
+					continue;
+
 				CommandInfo cmd = info.Add (dir.Replace("_", "__"), dir);
-				cmd.Enabled = fullPaths.Contains (proj.BaseDirectory.Combine (dir));
 			}
 		}
 
@@ -88,7 +93,8 @@ namespace MonoDevelop.AspNet
 			//instead we switch the loops
 			foreach (ProjectFile pf in proj.Files) {
 				for (int i = 0; i < dirs.Count; i++) {
-					if (pf.FilePath.IsChildPathOf (dirs[i])) {
+					// Equality comparison in case we don't have files in dirs[i].
+					if (pf.FilePath.IsChildPathOf (dirs[i]) || pf.FilePath == dirs[i]) {
 						dirs.RemoveAt (i);
 						if (dirs.Count == 0)
 							return;

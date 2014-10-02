@@ -33,12 +33,13 @@ using System.Collections.Generic;
 using Mono.Debugging.Client;
 using MonoDevelop.Core;
 using MonoDevelop.Ide;
+using Gtk;
 
 namespace MonoDevelop.SourceEditor
 {
 	public class PinnedWatchWidget : Gtk.EventBox
 	{
-		ObjectValueTreeView valueTree;
+		readonly ObjectValueTreeView valueTree;
 		ObjectValue objectValue;
 
 		TextEditor Editor {
@@ -54,6 +55,9 @@ namespace MonoDevelop.SourceEditor
 				return objectValue;
 			}
 			set {
+				if (objectValue == value)
+					return;
+
 				if (objectValue != null && value != null) {
 					valueTree.ReplaceValue (objectValue, value);
 				} else {
@@ -138,7 +142,13 @@ namespace MonoDevelop.SourceEditor
 		{
 			base.OnSizeAllocated (allocation);
 		}
-		
+
+		const int defaultMaxHeight = 240;
+		protected override void OnSizeRequested (ref Requisition requisition)
+		{
+			base.OnSizeRequested (ref requisition);
+			requisition.Height = Math.Min (Math.Max (Allocation.Height, defaultMaxHeight), requisition.Height);
+		}
 
 		[GLib.ConnectBeforeAttribute]
 		void HandleValueTreeButtonPressEvent (object o, Gtk.ButtonPressEventArgs args)

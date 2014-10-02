@@ -46,12 +46,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 	internal class RuntimeOptionsPanel : ItemOptionsPanel
 	{
 		RuntimeOptionsPanelWidget widget;
-		
-		public override bool IsVisible ()
-		{
-			return (ConfiguredProject is DotNetProject) && !(ConfiguredProject is PortableDotNetProject);
-		}
-		
+
 		public override Widget CreatePanelWidget()
 		{
 			return (widget = new RuntimeOptionsPanelWidget ((DotNetProject)ConfiguredProject, ItemConfigurations));
@@ -65,8 +60,8 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 
 	partial class RuntimeOptionsPanelWidget : Gtk.Bin 
 	{
-		DotNetProject project;
-		List<TargetFramework> frameworks;
+		readonly List<TargetFramework> frameworks;
+		readonly DotNetProject project;
 
 		public RuntimeOptionsPanelWidget (DotNetProject project, IEnumerable<ItemConfiguration> configurations)
 		{
@@ -88,7 +83,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 				notInstalled = true;
 				frameworks.Add (project.TargetFramework);
 			}
-				
+
 			//sort by id ascending, version descending, profile ascending
 			frameworks.Sort ((x, y) => {
 				var cmp = string.CompareOrdinal (x.Id.Identifier, y.Id.Identifier);

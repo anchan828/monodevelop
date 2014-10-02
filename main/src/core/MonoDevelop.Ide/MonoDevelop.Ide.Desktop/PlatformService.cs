@@ -28,6 +28,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -88,23 +89,31 @@ namespace MonoDevelop.Ide.Desktop
             LoggingService.LogWarning("Unable to open {0}", url);
 		}
 
+		/// <summary>
+		/// Loads the XWT toolkit backend for the native toolkit (Cocoa on Mac, WPF on Windows)
+		/// </summary>
+		/// <returns>The native toolkit.</returns>
+		public virtual Xwt.Toolkit LoadNativeToolkit ()
+		{
+			return Xwt.Toolkit.CurrentEngine;
+		}
+
 		public string GetMimeTypeForUri (string uri)
 		{
 			if (!String.IsNullOrEmpty (uri)) {
-// Creating file infos is expensive, should be avoided 
-//				FileInfo file = new FileInfo (uri);
-//				MimeTypeNode mt = FindMimeTypeForFile (file.Name);
 				MimeTypeNode mt = FindMimeTypeForFile (uri);
 				if (mt != null)
 					return mt.Id;
 			}
-			return OnGetMimeTypeForUri (uri) ?? "text/plain";
+			return OnGetMimeTypeForUri (uri) ?? "application/octet-stream";
 		}
-		
+
 		public string GetMimeTypeDescription (string mimeType)
 		{
 			if (mimeType == "text/plain")
 				return GettextCatalog.GetString ("Text file");
+			if (mimeType == "application/octet-stream")
+				return GettextCatalog.GetString ("Unknown");
 			MimeTypeNode mt = FindMimeType (mimeType);
 			if (mt != null && mt.Description != null)
 				return mt.Description;
@@ -129,14 +138,14 @@ namespace MonoDevelop.Ide.Desktop
 		{
 			yield return mimeType;
 			
-			while (mimeType != null && mimeType != "text/plain") {
+			while (mimeType != null && mimeType != "text/plain" && mimeType != "application/octet-stream") {
 				MimeTypeNode mt = FindMimeType (mimeType);
 				if (mt != null && !string.IsNullOrEmpty (mt.BaseType))
 					mimeType = mt.BaseType;
 				else {
-					if (mimeType.EndsWith ("+xml"))
+					if (mimeType.EndsWith ("+xml", StringComparison.Ordinal))
 						mimeType = "application/xml";
-					else if (mimeType.StartsWith ("text") || OnGetMimeTypeIsText (mimeType))
+					else if (mimeType.StartsWith ("text/", StringComparison.Ordinal) || OnGetMimeTypeIsText (mimeType))
 						mimeType = "text/plain";
 					else
 						break;
@@ -246,8 +255,8 @@ namespace MonoDevelop.Ide.Desktop
 					var mimeTypeNode = (MimeTypeNode)args.ExtensionNode;
 					switch (args.Change) {
 					case ExtensionChange.Add:
-							// initialize child nodes.
-						var initialize = mimeTypeNode.ChildNodes;
+						// initialize child nodes.
+						mimeTypeNode.ChildNodes.GetEnumerator ();
 						newList.Add (mimeTypeNode);
 						break;
 					case ExtensionChange.Remove:
@@ -276,7 +285,7 @@ namespace MonoDevelop.Ide.Desktop
 			}
 			return null;
 		}
-		
+
 		protected virtual string OnGetMimeTypeForUri (string uri)
 		{
 			return null;
@@ -344,23 +353,35 @@ namespace MonoDevelop.Ide.Desktop
 			UnixFileSystemInfo info = UnixFileSystemInfo.GetFileSystemEntry (fileName);
 			info.FileAccessPermissions = (FileAccessPermissions)attributes;
 		}
-		
-		public virtual IProcessAsyncOperation StartConsoleProcess (string command, string arguments, string workingDirectory,
-		                                                           IDictionary<string, string> environmentVariables, 
-		                                                           string title, bool pauseWhenFinished)
+
+		//must be implemented if CanOpenTerminal returns true
+		public virtual IProcessAsyncOperation StartConsoleProcess (
+			string command, string arguments, string workingDirectory,
+			IDictionary<string, string> environmentVariables,
+			string title, bool pauseWhenFinished)
 		{
-			return null;
+			throw new InvalidOperationException ();
 		}
-		
+
+		/// <summary>
+		/// True if both OpenTerminal and StartConsoleProcess are implemented.
+		/// </summary>
 		public virtual bool CanOpenTerminal {
-			get {
-				return false;
-			}
+			get { return false; }
 		}
-		
+
+		[Obsolete ("Implement/call OpenTerminal instead")]
 		public virtual void OpenInTerminal (FilePath directory)
 		{
 			throw new InvalidOperationException ();
+		}
+
+		public virtual void OpenTerminal (FilePath directory, IDictionary<string, string> environmentVariables, string title)
+		{
+			// use old version as old fallback, it'll throw if it's not implemted either
+			#pragma warning disable 618
+			OpenInTerminal (directory);
+			#pragma warning restore 618
 		}
 		
 		protected virtual RecentFiles CreateRecentFilesProvider ()
@@ -418,6 +439,10 @@ namespace MonoDevelop.Ide.Desktop
 		public virtual void GrabDesktopFocus (Gtk.Window window)
 		{
 			window.Present ();
+		}
+
+		internal virtual void RemoveWindowShadow (Gtk.Window window)
+		{
 		}
 
 		internal virtual void SetMainWindowDecorations (Gtk.Window window)

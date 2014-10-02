@@ -35,6 +35,15 @@ namespace Mono.TextEditor
 		Always
 	}
 
+	[Flags]
+	public enum IncludeWhitespaces {
+		None        = 0,
+		Space       = 1,
+		Tab         = 2,
+		LineEndings = 4,
+		All         = Space | Tab | LineEndings
+	}
+	
 	public interface ITextEditorOptions : IDisposable
 	{
 		double Zoom { get; set; }
@@ -70,16 +79,20 @@ namespace Mono.TextEditor
 
 		bool DrawIndentationMarkers { get; set; }
 
-		bool UseAntiAliasing { get; set; }
 		bool WrapLines { get; set; }
 		string FontName { get;  set; }
 		Pango.FontDescription Font { get;  }
+
+		string GutterFontName { get; set; }
+		Pango.FontDescription GutterFont { get; }
 		
 		string ColorScheme { get; set;  }
 		string DefaultEolMarker { get; set; }
 
 		ShowWhitespaces ShowWhitespaces { get; set; }
+		IncludeWhitespaces IncludeWhitespaces { get; set; }
 
+		bool GenerateFormattingUndoStep { get; set; }
 		ColorScheme GetColorStyle ();
 		
 		event EventHandler Changed;

@@ -20,9 +20,12 @@
     <Execution>
       <Execution clr-version="Net_2_0" />
     </Execution>
+    <DefineConstants>DEBUG</DefineConstants>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\build\AddIns\NUnit\MonoDevelop.NUnit.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>none</DebugType>
+    <DebugType>pdbonly</DebugType>
     <Optimize>True</Optimize>
     <OutputPath>..\..\..\build\AddIns\NUnit\</OutputPath>
     <ErrorReport>prompt</ErrorReport>
@@ -30,6 +33,9 @@
     <Execution>
       <Execution clr-version="Net_2_0" />
     </Execution>
+    <DebugSymbols>true</DebugSymbols>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\build\AddIns\NUnit\MonoDevelop.NUnit.xml</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="nunit.core">
@@ -66,6 +72,8 @@
     <Reference Include="nunit.util">
       <HintPath>lib\nunit.util.dll</HintPath>
     </Reference>
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\core\MonoDevelop.Core\MonoDevelop.Core.csproj">
@@ -139,9 +147,6 @@
     <EmbeddedResource Include="Gui\nunit-overlay-32.png">
       <LogicalName>nunit-overlay-32.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="md1format.xml">
-      <LogicalName>md1format.xml</LogicalName>
-    </EmbeddedResource>
     <EmbeddedResource Include="gtk-gui\gui.stetic">
       <LogicalName>gui.stetic</LogicalName>
     </EmbeddedResource>
@@ -167,7 +172,6 @@
     <Compile Include="Gui\NUnitAssemblyGroupNodeBuilder.cs" />
     <Compile Include="Gui\NUnitAssemblyGroupConfigurationNodeBuilder.cs" />
     <Compile Include="Gui\TestAssemblyNodeBuilder.cs" />
-    <Compile Include="Project\NUnitAssemblyGroupFileFormat.cs" />
     <Compile Include="Project\NUnitAssemblyGroupProject.cs" />
     <Compile Include="Project\TestAssembly.cs" />
     <Compile Include="Project\TestAssemblyCollection.cs" />
@@ -197,6 +201,8 @@
     <Compile Include="Services\NUnitProjectServiceExtension.cs" />
     <Compile Include="Gui\NUnitOptionsPanel.cs" />
     <Compile Include="gtk-gui\MonoDevelop.NUnit.NUnitOptionsWidget.cs" />
+    <Compile Include="Services\TcpTestListener.cs" />
+    <Compile Include="AddinInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Makefile.am" />

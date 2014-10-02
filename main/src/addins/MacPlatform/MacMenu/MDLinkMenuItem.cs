@@ -43,23 +43,14 @@ namespace MonoDevelop.MacIntegration.MacMenu
 			Action = MDMenuItem.ActionSel;
 		}
 
-		[Export ("run")]
+		[Export (MDMenuItem.ActionSelName)]
 		public void Run ()
 		{
 			MonoDevelop.Ide.DesktopService.ShowUrl (lce.Url);
 		}
 
-		//NOTE: This is used to disable the whole menu when there's a modal dialog.
-		// We can justify this because safari 3.2.1 does it ("do you want to close all tabs?").
-		static bool IsGloballyDisabled {
-			get {
-				return !MonoDevelop.Ide.IdeApp.Workbench.HasToplevelFocus;
-			}
-		}
-
 		public void Update (MDMenu parent, ref NSMenuItem lastSeparator, ref int index)
 		{
-			Enabled = !MDMenuItem.IsGloballyDisabled;
 			MDMenu.ShowLastSeparator (ref lastSeparator);
 		}
 	}

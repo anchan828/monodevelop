@@ -84,6 +84,21 @@ namespace MonoDevelop.Projects
 				rootFolder = value;
 			}
 		}
+
+		/// <summary>
+		/// Folder where to add solution files, when none is created
+		/// </summary>
+		public SolutionFolder DefaultSolutionFolder {
+			get {
+				var itemsFolder = (SolutionFolder)RootFolder.Items.FirstOrDefault (item => item.Name == "Solution Items");
+				if (itemsFolder == null) {
+					itemsFolder = new SolutionFolder ();
+					itemsFolder.Name = "Solution Items";
+					RootFolder.AddItem (itemsFolder);
+				}
+				return itemsFolder;
+			}
+		}
 		
 		// Does not include solution folders
 		public ReadOnlyCollection<SolutionItem> Items {
@@ -220,12 +235,12 @@ namespace MonoDevelop.Projects
 			}
 		}
 
-		public override void LoadUserProperties ()
+		protected override void OnEndLoad ()
 		{
-			base.LoadUserProperties ();
+			base.OnEndLoad ();
 			LoadItemProperties (UserProperties, RootFolder, "MonoDevelop.Ide.ItemProperties");
 		}
-		
+
 		public override void SaveUserProperties ()
 		{
 			CollectItemProperties (UserProperties, RootFolder, "MonoDevelop.Ide.ItemProperties");
@@ -487,6 +502,31 @@ namespace MonoDevelop.Projects
 			Counters.SolutionsLoaded--;
 		}
 
+		internal bool IsSolutionItemEnabled (string solutionItemPath)
+		{
+			solutionItemPath = GetRelativeChildPath (Path.GetFullPath (solutionItemPath));
+			var list = UserProperties.GetValue<List<string>> ("DisabledProjects");
+			return list == null || !list.Contains (solutionItemPath);
+		}
+
+		public void SetSolutionItemEnabled (string solutionItemPath, bool enabled)
+		{
+			solutionItemPath = GetRelativeChildPath (Path.GetFullPath (solutionItemPath));
+			var list = UserProperties.GetValue<List<string>> ("DisabledProjects");
+			if (!enabled) {
+				if (list == null)
+					list = new List<string> ();
+				if (!list.Contains (solutionItemPath))
+					list.Add (solutionItemPath);
+				UserProperties.SetValue ("DisabledProjects", list);
+			} else if (list != null) {
+				list.Remove (solutionItemPath);
+				if (list.Count == 0)
+					UserProperties.RemoveValue ("DisabledProjects");
+				else
+					UserProperties.SetValue ("DisabledProjects", list);
+			}
+		}
 
 		internal void UpdateDefaultConfigurations ()
 		{
@@ -564,17 +604,7 @@ namespace MonoDevelop.Projects
 				monitor.EndTask ();
 			}
 		}
-		
-		protected internal override bool OnGetNeedsBuilding (ConfigurationSelector configuration)
-		{
-			return RootFolder.NeedsBuilding (configuration);
-		}
-		
-		protected internal override void OnSetNeedsBuilding (bool val, ConfigurationSelector configuration)
-		{
-			RootFolder.SetNeedsBuilding (val, configuration);
-		}
-		
+
 		protected virtual void OnStartupItemChanged(EventArgs e)
 		{
 			if (StartupItemChanged != null)
@@ -614,26 +644,39 @@ namespace MonoDevelop.Projects
 			SolutionFolder sf = args.SolutionItem as SolutionFolder;
 			if (sf != null) {
 				foreach (SolutionItem eitem in sf.GetAllItems<SolutionItem> ())
-					SetupNewItem (eitem);
+					SetupNewItem (eitem, null);
 			}
 			else {
-				SetupNewItem (args.SolutionItem);
+				SetupNewItem (args.SolutionItem, args.ReplacedItem);
 			}
 			
 			if (SolutionItemAdded != null)
 				SolutionItemAdded (this, args);
 		}
 		
-		void SetupNewItem (SolutionItem item)
+		void SetupNewItem (SolutionItem item, SolutionItem replacedItem)
 		{
 			ConvertToSolutionFormat (item, false);
 			
 			SolutionEntityItem eitem = item as SolutionEntityItem;
 			if (eitem != null) {
 				eitem.NeedsReload = false;
-				// Register the new entry in every solution configuration
-				foreach (SolutionConfiguration conf in Configurations)
-					conf.AddItem (eitem);
+				if (replacedItem == null) {
+					// Register the new entry in every solution configuration
+					foreach (SolutionConfiguration conf in Configurations)
+						conf.AddItem (eitem);
+				} else {
+					// Reuse the configuration information of the replaced item
+					foreach (SolutionConfiguration conf in Configurations)
+						conf.ReplaceItem ((SolutionEntityItem)replacedItem, eitem);
+					if (StartupItem == replacedItem)
+						StartupItem = eitem;
+					else {
+						int i = MultiStartupItems.IndexOf ((SolutionEntityItem)replacedItem);
+						if (i != -1)
+							MultiStartupItems [i] = eitem;
+					}
+				}
 			}
 		}
 		
@@ -669,18 +712,20 @@ namespace MonoDevelop.Projects
 		void DetachItem (SolutionEntityItem item, bool reloading)
 		{
 			item.NeedsReload = false;
-			foreach (SolutionConfiguration conf in Configurations)
-				conf.RemoveItem (item);
-			if (!reloading && item is DotNetProject)
-				RemoveReferencesToProject ((DotNetProject) item);
+			if (!reloading) {
+				foreach (SolutionConfiguration conf in Configurations)
+					conf.RemoveItem (item);
+				if (item is DotNetProject)
+					RemoveReferencesToProject ((DotNetProject)item);
+
+				if (StartupItem == item)
+					StartupItem = null;
+				else
+					MultiStartupItems.Remove (item);
+			}
 			
 			// Update the file name because the file format may have changed
 			item.FileName = item.FileName;
-			
-			if (StartupItem == item)
-				StartupItem = null;
-			else
-				MultiStartupItems.Remove (item);
 		}
 		
 		void RemoveReferencesToProject (DotNetProject projectToRemove)

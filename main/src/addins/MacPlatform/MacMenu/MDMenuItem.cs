@@ -38,7 +38,8 @@ namespace MonoDevelop.MacIntegration.MacMenu
 	//TODO: autohide, arrray
 	class MDMenuItem : NSMenuItem, IUpdatableMenuItem
 	{
-		public static Selector ActionSel = new Selector ("run:");
+		public const string ActionSelName = "run:";
+		public static Selector ActionSel = new Selector (ActionSelName);
 
 		CommandEntry ce;
 		CommandManager manager;
@@ -58,22 +59,26 @@ namespace MonoDevelop.MacIntegration.MacMenu
 
 		public CommandEntry CommandEntry { get { return ce; } }
 
-		[Export ("run:")]
+		[Export (ActionSelName)]
 		public void Run (NSMenuItem sender)
 		{
 			var a = sender as MDExpandedArrayItem;
-			if (a != null) {
-				manager.DispatchCommand (ce.CommandId, a.Info.DataItem, CommandSource.MainMenu);
-			} else {
-				manager.DispatchCommand (ce.CommandId, CommandSource.MainMenu);
-			}
+			//if the command opens a modal subloop, give cocoa a chance to unhighlight the menu item
+			GLib.Timeout.Add (1, () => {
+				if (a != null) {
+					manager.DispatchCommand (ce.CommandId, a.Info.DataItem, CommandSource.MainMenu);
+				} else {
+					manager.DispatchCommand (ce.CommandId, CommandSource.MainMenu);
+				}
+				return false;
+			});
 		}
 
 		//NOTE: This is used to disable the whole menu when there's a modal dialog.
 		// We can justify this because safari 3.2.1 does it ("do you want to close all tabs?").
 		public static bool IsGloballyDisabled {
 			get {
-				return !MonoDevelop.Ide.IdeApp.Workbench.HasToplevelFocus;
+				return MonoDevelop.Ide.DesktopService.IsModalDialogRunning ();
 			}
 		}
 
@@ -111,7 +116,7 @@ namespace MonoDevelop.MacIntegration.MacMenu
 					n.Hidden = true;
 					n.Target = this;
 					lastSeparator = n;
-					parent.InsertItematIndex (n, index++);
+					parent.InsertItem (n, index++);
 					continue;
 				}
 
@@ -131,7 +136,7 @@ namespace MonoDevelop.MacIntegration.MacMenu
 
 				if (!item.Hidden)
 					MDMenu.ShowLastSeparator (ref lastSeparator);
-				parent.InsertItematIndex (item, index++);
+				parent.InsertItem (item, index++);
 			}
 		}
 
@@ -226,15 +231,20 @@ namespace MonoDevelop.MacIntegration.MacMenu
 			if (txt == null)
 				return "";
 
-			if (!ci.UseMarkup)
-				return txt.Replace ("_", "&");
-
-			//strip GMarkup
 			//FIXME: markup stripping could be done better
 			var sb = new StringBuilder ();
 			for (int i = 0; i < txt.Length; i++) {
 				char ch = txt[i];
-				if (ch == '<') {
+				if (ch == '_') {
+					if (i + 1 < txt.Length && txt[i + 1] == '_') {
+						sb.Append ('_');
+						i++;
+					} else {
+						sb.Append ('&');
+					}
+				} else if (!ci.UseMarkup) {
+					sb.Append (ch);
+				} else if (ch == '<') {
 					while (++i < txt.Length && txt[i] != '>');
 				} else if (ch == '&') {
 					int j = i;
@@ -263,8 +273,6 @@ namespace MonoDevelop.MacIntegration.MacMenu
 							break;
 						}
 					}
-				} if (ch == '_') {
-					sb.Append ('&');
 				} else {
 					sb.Append (ch);
 				}

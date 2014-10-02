@@ -84,6 +84,7 @@ namespace MonoDevelop.SourceEditor
 			UpdateStylePolicy (currentPolicy);
 			PropertyService.PropertyChanged += UpdatePreferences;
 			FontService.RegisterFontChangedCallback ("Editor", UpdateFont);
+			FontService.RegisterFontChangedCallback ("Editor(Gutter)", UpdateFont);
 			FontService.RegisterFontChangedCallback ("MessageBubbles", UpdateFont);
 			
 		}
@@ -97,6 +98,7 @@ namespace MonoDevelop.SourceEditor
 		void UpdateFont ()
 		{
 			base.FontName = FontName;
+			base.GutterFontName = GutterFontName;
 			this.OnChanged (EventArgs.Empty);
 		
 		}
@@ -161,6 +163,9 @@ namespace MonoDevelop.SourceEditor
 				case "FontName":
 					base.FontName = (string)args.NewValue;
 					break;
+				case "GutterFontName":
+					base.GutterFontName = (string)args.NewValue;
+					break;
 				case "ColorScheme":
 					base.ColorScheme = (string)args.NewValue;
 					break;
@@ -182,17 +187,14 @@ namespace MonoDevelop.SourceEditor
 				case "EnableAnimations":
 					base.EnableAnimations = (bool)args.NewValue;
 					break;
-				case "UseAntiAliasing":
-					base.UseAntiAliasing = (bool)args.NewValue;
-					break;
 				case "DrawIndentationMarkers":
 					base.DrawIndentationMarkers = (bool)args.NewValue;
 					break;
 				case "EnableQuickDiff":
 					base.EnableQuickDiff = (bool)args.NewValue;
 					break;
-				case "HideObsoleteItems":
-					this.HideObsoleteItems = (bool) args.NewValue;
+				case "GenerateFormattingUndoStep":
+					base.GenerateFormattingUndoStep = (bool)args.NewValue;
 					break;
 				}
 			} catch (Exception ex) {
@@ -216,22 +218,23 @@ namespace MonoDevelop.SourceEditor
 			base.HighlightMatchingBracket = PropertyService.Get ("HighlightMatchingBracket", true);
 			base.ShowRuler = PropertyService.Get ("ShowRuler", false);
 			base.FontName = PropertyService.Get ("FontName", "Mono 10");
+			base.GutterFontName = PropertyService.Get ("GutterFontName", "");
 			base.ColorScheme = PropertyService.Get ("ColorScheme", "Default");
 			this.defaultRegionsFolding = PropertyService.Get ("DefaultRegionsFolding", false);
 			this.defaultCommentFolding = PropertyService.Get ("DefaultCommentFolding", true);
 			this.useViModes = PropertyService.Get ("UseViModes", false);
 			this.onTheFlyFormatting = PropertyService.Get ("OnTheFlyFormatting", true);
-			this.hideObsoleteItems = PropertyService.Get ("HideObsoleteItems", true);
 			var defaultControlMode = (ControlLeftRightMode)Enum.Parse (typeof(ControlLeftRightMode), DesktopService.DefaultControlLeftRightBehavior);
 			this.ControlLeftRightMode = PropertyService.Get ("ControlLeftRightMode", defaultControlMode);
 			base.EnableAnimations = PropertyService.Get ("EnableAnimations", true);
-			base.UseAntiAliasing = PropertyService.Get ("UseAntiAliasing", true);
 			this.EnableHighlightUsages = PropertyService.Get ("EnableHighlightUsages", false);
-			this.DrawIndentationMarkers = PropertyService.Get ("DrawIndentationMarkers", false);
+			base.DrawIndentationMarkers = PropertyService.Get ("DrawIndentationMarkers", false);
 			this.lineEndingConversion = PropertyService.Get ("LineEndingConversion", LineEndingConversion.Ask);
-			this.ShowWhitespaces = PropertyService.Get ("ShowWhitespaces", Mono.TextEditor.ShowWhitespaces.Never);
-			this.WrapLines = PropertyService.Get ("WrapLines", false);
-			this.EnableQuickDiff = PropertyService.Get ("EnableQuickDiff", false);
+			base.GenerateFormattingUndoStep = PropertyService.Get ("GenerateFormattingUndoStep", false);
+			base.ShowWhitespaces = PropertyService.Get ("ShowWhitespaces", Mono.TextEditor.ShowWhitespaces.Never);
+			base.IncludeWhitespaces = PropertyService.Get ("IncludeWhitespaces", Mono.TextEditor.IncludeWhitespaces.All);
+			base.WrapLines = PropertyService.Get ("WrapLines", false);
+			base.EnableQuickDiff = PropertyService.Get ("EnableQuickDiff", false);
 		}
 		
 		#region new options
@@ -239,19 +242,6 @@ namespace MonoDevelop.SourceEditor
 		public bool EnableAutoCodeCompletion {
 			get { return CompletionTextEditorExtension.EnableAutoCodeCompletion; }
 			set { CompletionTextEditorExtension.EnableAutoCodeCompletion.Set (value); }
-		}
-		
-		bool hideObsoleteItems;
-		public bool HideObsoleteItems {
-			get {
-				return hideObsoleteItems;
-			}
-			set {
-				if (value != hideObsoleteItems) {
-					hideObsoleteItems = value;
-					PropertyService.Set ("HideObsoleteItems", value);
-				}
-			}
 		}
 		
 		bool defaultRegionsFolding;
@@ -351,17 +341,7 @@ namespace MonoDevelop.SourceEditor
 				}
 			}
 		}
-		
-		public bool EnableCodeCompletion {
-			get { return CompletionTextEditorExtension.EnableCodeCompletion; }
-			set { CompletionTextEditorExtension.EnableCodeCompletion.Value = value; }
-		}
-		
-		public bool EnableParameterInsight {
-			get { return CompletionTextEditorExtension.EnableParameterInsight; }
-			set { CompletionTextEditorExtension.EnableParameterInsight.Value = value; }
-		}
-		
+
 		bool underlineErrors;
 		public bool UnderlineErrors {
 			get {
@@ -432,6 +412,7 @@ namespace MonoDevelop.SourceEditor
 			}
 		}
 		
+
 		#endregion
 		
 		bool useViModes = false;
@@ -614,13 +595,6 @@ namespace MonoDevelop.SourceEditor
 			}
 		}
 		
-		public override bool UseAntiAliasing {
-			set {
-				PropertyService.Set ("UseAntiAliasing", value);
-				base.UseAntiAliasing = value;
-			}
-		}
-
 		public override bool DrawIndentationMarkers {
 			set {
 				PropertyService.Set ("DrawIndentationMarkers", value);
@@ -632,6 +606,13 @@ namespace MonoDevelop.SourceEditor
 			set {
 				PropertyService.Set ("ShowWhitespaces", value);
 				base.ShowWhitespaces = value;
+			}
+		}
+
+		public override IncludeWhitespaces IncludeWhitespaces {
+			set {
+				PropertyService.Set ("IncludeWhitespaces", value);
+				base.IncludeWhitespaces = value;
 			}
 		}
 
@@ -658,6 +639,15 @@ namespace MonoDevelop.SourceEditor
 			}
 		}
 		
+		public override string GutterFontName {
+			get {
+				return FontService.FilterFontName (FontService.GetUnderlyingFontName ("Editor(Gutter)"));
+			}
+			set {
+				throw new InvalidOperationException ("Set font through font service");
+			}
+		}
+		
 		public override string ColorScheme {
 			set {
 				string newColorScheme = !String.IsNullOrEmpty (value) ? value : "Default";
@@ -665,7 +655,14 @@ namespace MonoDevelop.SourceEditor
 				base.ColorScheme =  newColorScheme;
 			}
 		}
-		
+
+		public override bool GenerateFormattingUndoStep {
+			set {
+				PropertyService.Set ("GenerateFormattingUndoStep", value);
+				base.GenerateFormattingUndoStep = value;
+			}
+		}
+
 		#endregion
 	}
 }

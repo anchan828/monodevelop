@@ -41,6 +41,7 @@ using MonoDevelop.Core.Setup;
 using System.Security.Cryptography.X509Certificates;
 using System.Net.Security;
 using System.Net;
+using MonoDevelop.Core.Web;
 
 
 namespace MonoDevelop.Core
@@ -52,11 +53,29 @@ namespace MonoDevelop.Core
 		static AddinSetupService setupService;
 		static ApplicationService applicationService;
 		static bool initialized;
-		
+		static SynchronizationContext mainSynchronizationContext;
+
+		public static void GetAddinRegistryLocation (out string configDir, out string addinsDir, out string databaseDir)
+		{
+			//provides a development-time way to load addins that are being developed in a asperate solution
+			var devConfigDir = Environment.GetEnvironmentVariable ("MONODEVELOP_DEV_CONFIG");
+			if (devConfigDir != null && devConfigDir.Length == 0)
+				devConfigDir = null;
+
+			var devAddinDir = Environment.GetEnvironmentVariable ("MONODEVELOP_DEV_ADDINS");
+			if (devAddinDir != null && devAddinDir.Length == 0)
+				devAddinDir = null;
+
+			configDir = devConfigDir ?? UserProfile.Current.ConfigDir;
+			addinsDir = devAddinDir ?? UserProfile.Current.LocalInstallDir.Combine ("Addins");
+			databaseDir = devAddinDir ?? UserProfile.Current.CacheDir;
+		}
+
 		public static void Initialize (bool updateAddinRegistry)
 		{
 			if (initialized)
 				return;
+
 			Counters.RuntimeInitialization.BeginTiming ();
 			SetupInstrumentation ();
 
@@ -67,7 +86,7 @@ namespace MonoDevelop.Core
 				SynchronizationContext.SetSynchronizationContext (new SynchronizationContext ());
 
 			// Hook up the SSL certificate validation codepath
-			System.Net.ServicePointManager.ServerCertificateValidationCallback += delegate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors) {
+			ServicePointManager.ServerCertificateValidationCallback += delegate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors) {
 				if (sslPolicyErrors == SslPolicyErrors.None)
 					return true;
 				
@@ -79,18 +98,13 @@ namespace MonoDevelop.Core
 			AddinManager.AddinLoadError += OnLoadError;
 			AddinManager.AddinLoaded += OnLoad;
 			AddinManager.AddinUnloaded += OnUnload;
-			
-			//provides a development-time way to load addins that are being developed in a asperate solution
-			var devAddinDir = Environment.GetEnvironmentVariable ("MONODEVELOP_DEV_ADDINS");
-			if (devAddinDir != null && devAddinDir.Length == 0)
-				devAddinDir = null;
-			
+
 			try {
 				Counters.RuntimeInitialization.Trace ("Initializing Addin Manager");
-				AddinManager.Initialize (
-					UserProfile.Current.ConfigDir,
-					devAddinDir ?? UserProfile.Current.LocalInstallDir.Combine ("Addins"),
-					devAddinDir ?? UserProfile.Current.CacheDir);
+
+				string configDir, addinsDir, databaseDir;
+				GetAddinRegistryLocation (out configDir, out addinsDir, out databaseDir);
+				AddinManager.Initialize (configDir, addinsDir, databaseDir);
 				AddinManager.InitializeDefaultLocalizer (new DefaultAddinLocalizer ());
 				
 				if (updateAddinRegistry)
@@ -99,6 +113,7 @@ namespace MonoDevelop.Core
 				Counters.RuntimeInitialization.Trace ("Initialized Addin Manager");
 				
 				PropertyService.Initialize ();
+				WebService.Initialize ();
 				
 				//have to do this after the addin service and property service have initialized
 				if (UserDataMigrationService.HasSource) {
@@ -107,7 +122,7 @@ namespace MonoDevelop.Core
 				}
 				
 				RegisterAddinRepositories ();
-				
+
 				Counters.RuntimeInitialization.Trace ("Initializing Assembly Service");
 				systemAssemblyService = new SystemAssemblyService ();
 				systemAssemblyService.Initialize ();
@@ -183,7 +198,6 @@ namespace MonoDevelop.Core
 		static void OnLoadError (object s, AddinErrorEventArgs args)
 		{
 			string msg = "Add-in error (" + args.AddinId + "): " + args.Message;
-			LogReporting.LogReportingService.ReportUnhandledException (args.Exception, false, true);
 			LoggingService.LogError (msg, args.Exception);
 		}
 		
@@ -246,9 +260,39 @@ namespace MonoDevelop.Core
 			}
 		}
 		
+		static Version version;
+
+		public static Version Version {
+			get {
+				if (version == null) {
+					version = new Version (BuildInfo.Version);
+					#pragma warning disable 618
+					var relId = SystemInformation.GetReleaseId ();
+					#pragma warning restore 618
+					if (relId != null && relId.Length >= 9) {
+						int rev;
+						int.TryParse (relId.Substring (relId.Length - 4), out rev);
+						version = new Version (Math.Max (version.Major, 0), Math.Max (version.Minor, 0), Math.Max (version.Build, 0), Math.Max (rev, 0));
+					}
+				}
+				return version;
+			}
+		}
+
+		public static SynchronizationContext MainSynchronizationContext {
+			get {
+				return mainSynchronizationContext ?? SynchronizationContext.Current;
+			}
+			set {
+				if (mainSynchronizationContext != null && value != null)
+					throw new InvalidOperationException ("The main synchronization context has already been set");
+				mainSynchronizationContext = value;
+			}
+		}
+
 		public static void SetProcessName (string name)
 		{
-			if (Environment.OSVersion.Platform == PlatformID.Unix) {
+			if (!Platform.IsMac && !Platform.IsWindows) {
 				try {
 					unixSetProcessName (name);
 				} catch (Exception e) {

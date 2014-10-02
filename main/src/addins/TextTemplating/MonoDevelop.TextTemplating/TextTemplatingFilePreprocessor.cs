@@ -41,7 +41,7 @@ namespace MonoDevelop.TextTemplating
 		public IAsyncOperation Generate (IProgressMonitor monitor, ProjectFile file, SingleFileCustomToolResult result)
 		{
 			return new ThreadAsyncOperation (delegate {
-				var host = new MonoDevelopTemplatingHost ();
+				var host = new ProjectFileTemplatingHost (file);
 				
 				var dnp = file.Project as DotNetProject;
 				if (dnp == null) {
@@ -61,31 +61,20 @@ namespace MonoDevelop.TextTemplating
 				
 				var outputFile = file.FilePath.ChangeExtension (provider.FileExtension);
 				var encoding = System.Text.Encoding.UTF8;
-				string langauge;
+				string language;
 				string[] references;
 				string className = provider.CreateValidIdentifier (file.FilePath.FileNameWithoutExtension);
 				
-				string classNamespace = GetNamespaceHint (file, outputFile);
+				string classNamespace = CustomToolService.GetFileNamespace (file, outputFile);
 				LogicalSetData ("NamespaceHint", classNamespace, result.Errors);
 
-				host.PreprocessTemplate (file.FilePath, className, classNamespace, outputFile, encoding, out langauge, out references);
+				host.PreprocessTemplate (file.FilePath, className, classNamespace, outputFile, encoding, out language, out references);
 				
 				result.GeneratedFilePath = outputFile;
 				result.Errors.AddRange (host.Errors);
 				foreach (var err in host.Errors)
-					monitor.Log.WriteLine (err.ToString ());
+					monitor.Log.WriteLine (err);
 			}, result);
-		}
-		
-		internal static string GetNamespaceHint (ProjectFile file, string outputFile)
-		{
-			string ns = file.CustomToolNamespace;
-			if (string.IsNullOrEmpty (ns) && !string.IsNullOrEmpty (outputFile)) {
-				var dnp = file.Project as DotNetProject;
-					if (dnp != null)
-						ns = dnp.GetDefaultNamespace (outputFile);
-			}
-			return ns;
 		}
 		
 		static bool warningLogged;

@@ -98,7 +98,7 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 
 			store.Clear ();
 			foreach (SolutionConfigurationEntry ce in configuration.Configurations) {
-				if (ce.Item != null)
+				if (ce.Item != null && !(ce.Item is UnknownSolutionItem))
 					store.AppendValues (ce, ce.Item.Name, ce.Build);
 			}
 		}
@@ -114,7 +114,12 @@ namespace MonoDevelop.Ide.Projects.OptionPanels
 				values [n] = data.Configurations [n].Id;
 			CellRendererComboBox comboCell = (CellRendererComboBox) cell;
 			comboCell.Values = values;
-			comboCell.Text = entry.ItemConfiguration;
+
+			var escaped = GLib.Markup.EscapeText (entry.ItemConfiguration);
+			if (entry.Item.Configurations [entry.ItemConfiguration] == null)
+				comboCell.Markup = string.Format ("<span color='red'>{0}</span>", escaped);
+			else
+				comboCell.Markup = escaped;
 		}
 		
 		void OnBuildToggled (object sender, ToggledArgs args)

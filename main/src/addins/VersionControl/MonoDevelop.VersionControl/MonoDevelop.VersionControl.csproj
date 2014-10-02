@@ -20,9 +20,12 @@
     <Execution>
       <Execution clr-version="Net_2_0" />
     </Execution>
+    <DefineConstants>DEBUG</DefineConstants>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\..\build\AddIns\VersionControl\MonoDevelop.VersionControl.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>none</DebugType>
+    <DebugType>pdbonly</DebugType>
     <Optimize>True</Optimize>
     <OutputPath>..\..\..\..\build\AddIns\VersionControl\</OutputPath>
     <ErrorReport>prompt</ErrorReport>
@@ -30,6 +33,9 @@
     <Execution>
       <Execution clr-version="Net_2_0" />
     </Execution>
+    <DebugSymbols>true</DebugSymbols>
+    <NoWarn>1591;1573</NoWarn>
+    <DocumentationFile>..\..\..\..\build\AddIns\VersionControl\MonoDevelop.VersionControl.xml</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\core\MonoDevelop.Core\MonoDevelop.Core.csproj">
@@ -57,11 +63,6 @@
       <Name>MonoDevelop.DesignerSupport</Name>
       <Private>False</Private>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\core\Mono.Debugging\Mono.Debugging.csproj">
-      <Project>{90C99ADB-7D4B-4EB4-98C2-40BD1B14C7D2}</Project>
-      <Name>Mono.Debugging</Name>
-      <Private>False</Private>
-    </ProjectReference>
     <ProjectReference Include="..\..\MonoDevelop.Debugger\MonoDevelop.Debugger.csproj">
       <Project>{2357AABD-08C7-4808-A495-8FF2D3CDFDB0}</Project>
       <Name>MonoDevelop.Debugger</Name>
@@ -75,6 +76,16 @@
     <ProjectReference Include="..\..\..\..\external\mono-addins\Mono.Addins\Mono.Addins.csproj">
       <Project>{91DD5A2D-9FE3-4C3C-9253-876141874DAD}</Project>
       <Name>Mono.Addins</Name>
+      <Private>False</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\..\external\debugger-libs\Mono.Debugging\Mono.Debugging.csproj">
+      <Project>{90C99ADB-7D4B-4EB4-98C2-40BD1B14C7D2}</Project>
+      <Name>Mono.Debugging</Name>
+      <Private>False</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\..\external\xwt\Xwt\Xwt.csproj">
+      <Project>{92494904-35FA-4DC9-BDE9-3A3E87AC49D3}</Project>
+      <Name>Xwt</Name>
       <Private>False</Private>
     </ProjectReference>
   </ItemGroup>
@@ -102,40 +113,40 @@
     <Reference Include="Mono.Cairo" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="overlay_added.png">
+    <EmbeddedResource Include="icons\overlay_added.png">
       <LogicalName>overlay_added.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_modified.png">
+    <EmbeddedResource Include="icons\overlay_modified.png">
       <LogicalName>overlay_modified.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_conflicted.png">
+    <EmbeddedResource Include="icons\overlay_conflicted.png">
       <LogicalName>overlay_conflicted.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_normal.png">
+    <EmbeddedResource Include="icons\overlay_normal.png">
       <LogicalName>overlay_normal.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_locked.png">
+    <EmbeddedResource Include="icons\overlay_locked.png">
       <LogicalName>overlay_locked.png</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="VersionControl.addin.xml">
       <LogicalName>VersionControl.addin.xml</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_removed.png">
+    <EmbeddedResource Include="icons\overlay_removed.png">
       <LogicalName>overlay_removed.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="repository.png">
+    <EmbeddedResource Include="icons\repository.png">
       <LogicalName>repository.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_controled.png">
+    <EmbeddedResource Include="icons\overlay_controled.png">
       <LogicalName>overlay_controled.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_unversioned.png">
+    <EmbeddedResource Include="icons\overlay_unversioned.png">
       <LogicalName>overlay_unversioned.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_lock_required.png">
+    <EmbeddedResource Include="icons\overlay_lock_required.png">
       <LogicalName>overlay_lock_required.png</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="overlay_unlocked.png">
+    <EmbeddedResource Include="icons\overlay_unlocked.png">
       <LogicalName>overlay_unlocked.png</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Policies.xml">
@@ -144,8 +155,41 @@
     <EmbeddedResource Include="gtk-gui\gui.stetic">
       <LogicalName>gui.stetic</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="version-control-16.png">
+    <EmbeddedResource Include="icons\version-control-16.png">
       <LogicalName>version-control-16.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_log.png">
+      <LogicalName>menu_log.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_diff.png">
+      <LogicalName>menu_diff.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_update.png">
+      <LogicalName>menu_update.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_status.png">
+      <LogicalName>menu_status.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_commit.png">
+      <LogicalName>menu_commit.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_remote_status.png">
+      <LogicalName>menu_remote_status.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_add.png">
+      <LogicalName>menu_add.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_remove.png">
+      <LogicalName>menu_remove.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_resolve.png">
+      <LogicalName>menu_resolve.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\comment.png">
+      <LogicalName>comment.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="icons\menu_revert.png">
+      <LogicalName>menu_revert.png</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
@@ -153,12 +197,10 @@
     <Compile Include="MonoDevelop.VersionControl.Views\CellRendererDiff.cs" />
     <Compile Include="MonoDevelop.VersionControl.Views\LogView.cs" />
     <Compile Include="MonoDevelop.VersionControl.Views\StatusView.cs" />
-    <Compile Include="MonoDevelop.VersionControl.Views\AnnotateView.cs" />
     <Compile Include="MonoDevelop.VersionControl.Dialogs\CommitDialog.cs" />
     <Compile Include="MonoDevelop.VersionControl.Dialogs\EditRepositoryDialog.cs" />
     <Compile Include="MonoDevelop.VersionControl.Dialogs\SelectRepositoryDialog.cs" />
     <Compile Include="MonoDevelop.VersionControl\AddRemoveMoveCommand.cs" />
-    <Compile Include="MonoDevelop.VersionControl\AnnotateCommand.cs" />
     <Compile Include="MonoDevelop.VersionControl\BaseView.cs" />
     <Compile Include="MonoDevelop.VersionControl\ChangeSet.cs" />
     <Compile Include="MonoDevelop.VersionControl\CheckoutCommand.cs" />
@@ -230,44 +272,14 @@
     <Compile Include="MonoDevelop.VersionControl\MergeCommand.cs" />
     <Compile Include="MonoDevelop.VersionControl\BlameCommand.cs" />
     <Compile Include="MonoDevelop.VersionControl\VersionInfoCache.cs" />
+    <Compile Include="MonoDevelop.VersionControl\IgnoreCommand.cs" />
+    <Compile Include="MonoDevelop.VersionControl\ResolveConflictsCommand.cs" />
+    <Compile Include="MonoDevelop.VersionControl.Dialogs\VersionControlGeneralOptionsPanel.cs" />
+    <Compile Include="MonoDevelop.VersionControl.Dialogs\VersionControlSolutionOptionsPanel.cs" />
+    <Compile Include="AddinInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Makefile.am" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
-  <ItemGroup>
-    <Content Include="menu_log.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_diff.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_update.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_status.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_commit.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_remote_status.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_add.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_remove.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_resolve.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="comment.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="menu_revert.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
 </Project>

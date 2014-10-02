@@ -25,16 +25,16 @@
 // THE SOFTWARE.
 
 using System;
-using System.Collections.Generic;
-using Mono.Debugging.Client;
-using MonoDevelop.Core.Execution;
-using MonoDevelop.Core.Assemblies;
-using MonoDevelop.Core;
 using System.IO;
 using System.Reflection;
-using System.Diagnostics;
+using System.Collections.Generic;
+
 using Mono.Debugging.Soft;
-using MDLS = MonoDevelop.Core.LoggingService;
+using Mono.Debugging.Client;
+
+using MonoDevelop.Core;
+using MonoDevelop.Core.Execution;
+using MonoDevelop.Core.Assemblies;
 
 namespace MonoDevelop.Debugger.Soft
 {
@@ -42,7 +42,7 @@ namespace MonoDevelop.Debugger.Soft
 	{
 		static SoftDebuggerEngine ()
 		{
-			Mono.Debugging.Soft.LoggingService.CustomLogger = new MDLogger ();
+			DebuggerLoggingService.CustomLogger = new MDLogger ();
 		}
 		
 		public bool CanDebugCommand (ExecutionCommand cmd)
@@ -92,38 +92,12 @@ namespace MonoDevelop.Debugger.Soft
 		
 		public ProcessInfo[] GetAttachableProcesses ()
 		{
-			var infos = new List<ProcessInfo> ();
-			string baseProcessName;
-			
-			foreach (var process in Process.GetProcesses ()) {
-				try {
-					baseProcessName = Path.GetFileName (process.ProcessName);
-					if (baseProcessName.Equals ("mono", StringComparison.OrdinalIgnoreCase))
-						infos.Add (new ProcessInfo (process.Id, string.Format ("{0} ({1})", process.MainWindowTitle, baseProcessName)));
-				} catch {
-					// This can fail, but it doesn't matter
-				}
-			}
-			return infos.ToArray ();
+			return new ProcessInfo [0];
 		}
 		
 		public DebuggerSession CreateSession ()
 		{
 			return new SoftDebuggerSession ();
-		}
-		
-		public DebuggerFeatures SupportedFeatures {
-			get {
-				return DebuggerFeatures.Breakpoints | 
-					   DebuggerFeatures.Pause | 
-					   DebuggerFeatures.Stepping | 
-					   DebuggerFeatures.DebugFile |
-					   DebuggerFeatures.ConditionalBreakpoints |
-					   DebuggerFeatures.Tracepoints |
-					   DebuggerFeatures.Catchpoints | 
-					   DebuggerFeatures.Disassembly | 
-					   DebuggerFeatures.Attaching;
-			}
 		}
 		
 		public static void SetUserAssemblyNames (SoftDebuggerStartInfo dsi, IList<string> files)
@@ -153,7 +127,7 @@ namespace MonoDevelop.Debugger.Soft
 				} catch (Exception ex) {
 					dsi.LogMessage = GettextCatalog.GetString ("Could not get assembly name for user assembly '{0}'. " +
 						"Debugger will now debug all code, not just user code.", file);
-					MDLS.LogError ("Error getting assembly name for user assembly '" + file + "'", ex);
+					LoggingService.LogError ("Error getting assembly name for user assembly '" + file + "'", ex);
 					return;
 				}
 			}
@@ -166,7 +140,7 @@ namespace MonoDevelop.Debugger.Soft
 		{
 			public void LogError (string message, Exception ex)
 			{
-				MonoDevelop.Core.LoggingService.LogError (message, ex);
+				LoggingService.LogError (message, ex);
 			}
 			
 			public void LogAndShowException (string message, Exception ex)
@@ -177,7 +151,7 @@ namespace MonoDevelop.Debugger.Soft
 
 			public void LogMessage (string messageFormat, params object[] args)
 			{
-				MonoDevelop.Core.LoggingService.LogInfo (messageFormat, args);
+				LoggingService.LogInfo (messageFormat, args);
 			}
 		}
 	}

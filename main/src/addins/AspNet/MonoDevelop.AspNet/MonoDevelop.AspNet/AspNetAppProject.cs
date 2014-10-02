@@ -42,7 +42,6 @@ using MonoDevelop.Deployment;
 using MonoDevelop.Core.Assemblies;
 
 using MonoDevelop.AspNet.Parser;
-using MonoDevelop.AspNet.Parser.Dom;
 using MonoDevelop.AspNet.Deployment;
 using MonoDevelop.AspNet.Gui;
 using ICSharpCode.NRefactory.TypeSystem;
@@ -82,17 +81,6 @@ namespace MonoDevelop.AspNet
 		
 		protected override void OnEndLoad ()
 		{
-			base.OnEndLoad ();
-			
-			if (FileFormat.Id == "MD1") {
-				foreach (AspNetAppProjectConfiguration conf in Configurations) {
-					//migrate settings once
-					if (!conf.nonStandardOutputDirectory) {
-						conf.nonStandardOutputDirectory = true;
-						conf.OutputDirectory = String.IsNullOrEmpty (BaseDirectory)? "bin" : Path.Combine (BaseDirectory, "bin");
-					}
-				}
-			}
 			base.OnEndLoad ();
 			
 			//FIX: old version of MD didn't set CompileTarget to Library for ASP.NET projects, 
@@ -247,13 +235,14 @@ namespace MonoDevelop.AspNet
 					console = context.ExternalConsoleFactory.CreateConsole (!configuration.PauseConsoleOutput);
 				else
 					console = context.ConsoleFactory.CreateConsole (!configuration.PauseConsoleOutput);
-				
-				string url = String.Format ("http://{0}:{1}", this.XspParameters.Address, this.XspParameters.Port);
+
+				// The running Port value is now captured in the XspBrowserLauncherConsole object
+				string url = String.Format ("http://{0}", this.XspParameters.Address);
 				
 				
 				if (isXsp) {
-					console = new XspBrowserLauncherConsole (console, delegate {
-						BrowserLauncher.LaunchDefaultBrowser (url);
+					console = new XspBrowserLauncherConsole (console, delegate (string port) {
+						BrowserLauncher.LaunchDefaultBrowser (String.Format("{0}:{1}", url, port));
 					});
 				}
 			
@@ -297,45 +286,44 @@ namespace MonoDevelop.AspNet
 			string extension = System.IO.Path.GetExtension (fileName);
 			if (extension == null)
 				return WebSubtype.None;
-			extension = extension.ToLower ().TrimStart ('.');
+			extension = extension.ToUpperInvariant ().TrimStart ('.');
 			
 			//NOTE: No way to identify WebSubtype.Code from here
 			//use the instance method for that
-			switch (extension)
-			{
-			case "aspx":
+			switch (extension) {
+			case "ASPX":
 				return WebSubtype.WebForm;
-			case "master":
+			case "MASTER":
 				return WebSubtype.MasterPage;
-			case "ashx":
+			case "ASHX":
 				return WebSubtype.WebHandler;
-			case "ascx":
+			case "ASCX":
 				return WebSubtype.WebControl;
-			case "asmx":
+			case "ASMX":
 				return WebSubtype.WebService;
-			case "asax":
+			case "ASAX":
 				return WebSubtype.Global;
-			case "gif":
-			case "png":
-			case "jpg":
+			case "GIF":
+			case "PNG":
+			case "JPG":
 				return WebSubtype.WebImage;
-			case "skin":
+			case "SKIN":
 				return WebSubtype.WebSkin;
-			case "config":
+			case "CONFIG":
 				return WebSubtype.Config;
-			case "browser":
+			case "BROWSER":
 				return WebSubtype.BrowserDefinition;
-			case "axd":
+			case "AXD":
 				return WebSubtype.Axd;
-			case "sitemap":
+			case "SITEMAP":
 				return WebSubtype.Sitemap;
-			case "css":
+			case "CSS":
 				return WebSubtype.Css;
-			case "xhtml":
-			case "html":
-			case "htm":
+			case "XHTML":
+			case "HTML":
+			case "HTM":
 				return WebSubtype.Html;
-			case "js":
+			case "JS":
 				return WebSubtype.JavaScript;
 			default:
 				return WebSubtype.None;
@@ -770,11 +758,11 @@ namespace MonoDevelop.AspNet
 	{
 		IConsole real;
 		LineInterceptingTextWriter outWriter;
-		Action launchBrowser;
+		Action <string> launchBrowser;
 		
 		const int MAX_WATCHED_LINES = 30;
 		
-		public XspBrowserLauncherConsole (IConsole real, Action launchBrowser)
+		public XspBrowserLauncherConsole (IConsole real, Action <string> launchBrowser)
 		{
 			this.real = real;
 			this.launchBrowser = launchBrowser;
@@ -798,8 +786,10 @@ namespace MonoDevelop.AspNet
 			get {
 				if (outWriter == null)
 					outWriter = new LineInterceptingTextWriter (real.Out, delegate {
-						if (outWriter.GetLine ().StartsWith ("Listening on port: ")) {
-							launchBrowser ();
+						string line = outWriter.GetLine();
+						if (line.Contains ("Listening on port: ")) {
+							string port = System.Text.RegularExpressions.Regex.Match (line, "(?<=port: )[0-9]*(?= )").Value;
+							launchBrowser (port);
 							outWriter.FinishedIntercepting = true;
 						} else if (outWriter.LineCount > MAX_WATCHED_LINES) {
 							outWriter.FinishedIntercepting = true;

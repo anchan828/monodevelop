@@ -99,16 +99,20 @@ namespace MonoDevelop.Ide.Gui
 		}
 
 		[CommandHandler (FileCommands.OpenContainingFolder)]
-		protected void OnOpenContainingFolder ()
+		protected void OnOpenFolder ()
 		{
-			DesktopService.OpenFolder (doc.FileName.ParentDirectory);
+			// A tab will always hold a file, never a folder.
+			FilePath path = Path.GetDirectoryName (doc.FileName);
+			DesktopService.OpenFolder (path);
+		}
+		
+		[CommandUpdateHandler (FileCommands.OpenContainingFolder)]
+		protected void OnUpdateOpenFolder (CommandInfo info)
+		{
+			info.Visible = doc != null && !doc.FileName.IsNullOrEmpty;
+			info.Enabled = info.Visible;
 		}
 
-		[CommandUpdateHandler (FileCommands.OpenContainingFolder)]
-		protected void OnUpdateOpenContainingFolder (CommandInfo info)
-		{
-			info.Enabled = info.Visible = (doc.IsFile && File.Exists (doc.FileName.FullPath));
-		}
 		
 		/*** Edit commands ***/
 		
